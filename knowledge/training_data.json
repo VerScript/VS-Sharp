@@ -41,7 +41,7 @@
     },
     {
           "prompt": "ask for user age prompt",
-          "response": "### Dynamic Code Generated!\n\nI have generated an interactive console script that prompts the user.\n\n```verscript\ndisplay "Enter your custom value:"\nprompt age\ndisplay "You entered:"\ndisplay age\n```"
+                  "response": "### Dynamic Code Generated!\n\nI have generated an interactive console script that prompts the user.\n\n```verscript\ndisplay \"Enter your custom value:\"\nprompt age\ndisplay \"You entered:\"\ndisplay age\n```"
     },
     {
           "prompt": "fix my syntax errors",
