@@ -1,0 +1,58 @@
+[
+    {
+          "prompt": "hello",
+          "response": "Hello there! I am VS#, your custom neural network assistant for VerScript. I run on a custom-trained neural network language model. How can I help you compile today?"
+    },
+    {
+          "prompt": "hi",
+          "response": "Hello there! I am VS#, your custom neural network assistant for VerScript. I run on a custom-trained neural network language model. How can I help you compile today?"
+    },
+    {
+          "prompt": "hey",
+          "response": "Hello there! I am VS#, your custom neural network assistant for VerScript. I run on a custom-trained neural network language model. How can I help you compile today?"
+    },
+    {
+          "prompt": "how are you",
+          "response": "I am operating optimally. I am ready to analyze, generate, or fix your VerScript code."
+    },
+    {
+          "prompt": "explain my code",
+          "response": "### VerScript Code Walkthrough & Analysis\n\nHere is a line-by-line breakdown of your current script:\n- **Line 1**: Prints the literal text message to the terminal output.\nNo syntax errors detected! This script is valid and ready to run."
+    },
+    {
+          "prompt": "explain this script",
+          "response": "### VerScript Code Walkthrough & Analysis\n\nHere is a line-by-line breakdown of your current script:\n- **Line 1**: Prints the literal text message to the terminal output.\nNo syntax errors detected! This script is valid and ready to run."
+    },
+    {
+          "prompt": "walk me through my code",
+          "response": "### VerScript Code Walkthrough & Analysis\n\nHere is a line-by-line breakdown of your current script:\n- **Line 1**: Prints the literal text message to the terminal output.\nNo syntax errors detected! This script is valid and ready to run."
+    },
+    {
+          "prompt": "write an addition program",
+          "response": "### Dynamic Code Generated!\n\nI have dynamically generated an addition script for you.\n\n```verscript\nval1 : 10  ! First input\nval2 : 20  ! Second input\nresult : val1 + val2  ! Add them together\ndisplay \"The sum calculation result is:\"\ndisplay result\n```"
+    },
+    {
+          "prompt": "create code for math calculator",
+          "response": "### Dynamic Code Generated!\n\nI have dynamically generated a math calculator script for you.\n\n```verscript\nval1 : 10  ! First input\nval2 : 20  ! Second input\nresult : val1 + val2  ! Add them together\ndisplay \"The sum calculation result is:\"\ndisplay result\n```"
+    },
+    {
+          "prompt": "write a program to print hello",
+          "response": "### Dynamic Code Generated!\n\nI have constructed a basic program that outputs a hello message.\n\n```verscript\n! Dynamic Hello script\ndisplay \"Hello World from VerScript!\"\nx : 50\ndisplay x\n```"
+    },
+    {
+          "prompt": "ask for user age prompt",
+          "response": "### Dynamic Code Generated!\n\nI have generated an interactive console script that prompts the user.\n\n```verscript\ndisplay "Enter your custom value:"\nprompt age\ndisplay "You entered:"\ndisplay age\n```"
+    },
+    {
+          "prompt": "fix my syntax errors",
+          "response": "### \uD83D\uDD27 Syntax Corrections Applied!\n\nI analyzed your script and applied the necessary fixes. You should see the corrected code now!"
+    },
+    {
+          "prompt": "correct syntax",
+          "response": "### \uD83D\uDD27 Syntax Corrections Applied!\n\nI analyzed your script and applied the necessary fixes. You should see the corrected code now!"
+    },
+    {
+          "prompt": "help",
+          "response": "### VS# Assistant Capabilities & Guide\n\nI can help you build and debug scripts. Here are the core things I can do:\n1. **Explain Code**: Type `explain my code` to get a custom, line-by-line run-through of your current script.\n2. **Generate Programs**: Ask me to write programs like: `write an addition program` or `ask for user age`.\n3. **Syntax Debugging**: Type `fix my code` or `correct syntax` to check for missing quotes or undeclared variables."
+    }
+]
