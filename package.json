@@ -4,6 +4,7 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "prestart": "chmod +x ./verscript 2>/dev/null || true",
     "start": "node server.js"
   },
   "keywords": [],
