@@ -1,24 +1,12 @@
-const express = require('express');
-const cors = require('cors');
+// VS-Sharp — Custom Neural LLM + VerScript Runner
+// This module exports a function that mounts all routes onto an Express app.
+// It is designed to be consumed by PolyServer.
+
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const os = require('os');
 
-const app = express();
-
-// Allow IDE and landing page origins
-app.use(cors({
-    origin: [
-        'https://verscript.github.io',
-        'https://vs-sharp.onrender.com'
-    ],
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type']
-}));
-app.use(express.json({ limit: '1mb' }));
-
-const PORT = process.env.PORT || 3001;
 const WEIGHTS_FILE = path.join(__dirname, 'model_weights.json');
 const CONTEXT_WINDOW = 3;
 const EMBED_DIM = 16;
@@ -29,18 +17,13 @@ function tokenize(text) {
     const tokens = [];
     const regex = /(\r?\n|\w+|[^\w\s])/g;
     let match;
-    while ((match = regex.exec(text)) !== null) {
-        let t = match[0];
-        if (t === '\r\n' || t === '\n') {
-            tokens.push('\n');
-        } else {
-            tokens.push(t.toLowerCase());
-        }
+    while ((match = regex.exec(text.toLowerCase())) !== null) {
+        tokens.push(match[0]);
     }
     return tokens;
 }
 
-// --- FORWARD PASS FOR INFERENCE ---
+// --- NEURAL NETWORK FORWARD PASS ---
 function forward(contextIdxs, weights) {
     const { E, W1, b1, W2, b2 } = weights;
     const C = contextIdxs.length;
@@ -52,8 +35,8 @@ function forward(contextIdxs, weights) {
     const x = new Array(C * D);
     for (let c = 0; c < C; c++) {
         const idx = contextIdxs[c];
-        // Handle out-of-bounds or unknown index safely
-        const emb = E[idx] || E[0] || new Array(D).fill(0);
+        const safeIdx = (idx >= 0 && idx < E.length) ? idx : 0;
+        const emb = E[safeIdx];
         for (let d = 0; d < D; d++) {
             x[c * D + d] = emb[d];
         }
@@ -64,7 +47,7 @@ function forward(contextIdxs, weights) {
     for (let j = 0; j < H; j++) {
         let sum = b1[j];
         for (let i = 0; i < C * D; i++) {
-            sum += x[i] * (W1[i] ? W1[i][j] : 0);
+            sum += x[i] * W1[i][j];
         }
         h[j] = Math.tanh(sum);
     }
@@ -74,7 +57,7 @@ function forward(contextIdxs, weights) {
     for (let k = 0; k < V; k++) {
         let sum = b2[k];
         for (let j = 0; j < H; j++) {
-            sum += h[j] * (W2[j] ? W2[j][k] : 0);
+            sum += h[j] * W2[j][k];
         }
         logits[k] = sum;
     }
@@ -110,7 +93,7 @@ function generateLLMResponse(message, weightsData) {
     ];
 
     const generatedTokens = [];
-    const maxGenLength = 150;
+    const maxGenLength = 200;
 
     for (let step = 0; step < maxGenLength; step++) {
         // Prepare context
@@ -127,8 +110,7 @@ function generateLLMResponse(message, weightsData) {
         // Forward pass to get probs
         const probs = forward(context, weights);
 
-        // Softmax sampling (with low temperature to keep output coherent)
-        // Apply a small temperature scaling
+        // Softmax sampling with low temperature
         const temp = 0.3;
         const logProbs = probs.map(p => Math.log(p + 1e-10) / temp);
         const maxLog = Math.max(...logProbs);
@@ -148,9 +130,7 @@ function generateLLMResponse(message, weightsData) {
             }
         }
 
-        if (nextIdx === endIdx) {
-            break;
-        }
+        if (nextIdx === endIdx) break;
 
         sequenceIdxs.push(nextIdx);
         generatedTokens.push(vocab[nextIdx]);
@@ -158,11 +138,10 @@ function generateLLMResponse(message, weightsData) {
 
     // Decode generated tokens
     let responseText = "";
-    generatedTokens.forEach((t, i) => {
+    generatedTokens.forEach((t) => {
         if (t === '\n') {
             responseText += '\n';
         } else {
-            // Add space between tokens, except for newlines or start of text
             if (responseText.length > 0 && !responseText.endsWith('\n') && t !== '.' && t !== ',' && t !== '!' && t !== '?') {
                 responseText += ' ';
             }
@@ -177,104 +156,140 @@ function generateLLMResponse(message, weightsData) {
 function extractCodeBlock(text) {
     const regex = /```verscript\r?\n([\s\S]*?)```/i;
     const match = text.match(regex);
-    if (match) {
-        return match[1].trim();
-    }
+    if (match) return match[1].trim();
     
-    // Fallback if formatting lacks language tag but has ticks
     const fallbackRegex = /```\r?\n([\s\S]*?)```/;
     const fallbackMatch = text.match(fallbackRegex);
     return fallbackMatch ? fallbackMatch[1].trim() : null;
 }
 
-// --- VERSCRIPT CODE RUNNER ---
-// Uses the compiled Linux binary from the VerScript repo
-const VERSCRIPT_BIN = path.join(__dirname, 'verscript');
+// --- SMART CODE FIX ---
+// Analyzes user code and fixes common VerScript errors
+function fixVerScriptCode(code) {
+    if (!code || !code.trim()) return null;
+    
+    const lines = code.split('\n');
+    const fixed = lines.map(line => {
+        let trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('!')) return line;
+        
+        // Fix unclosed strings in display statements
+        if (trimmed.startsWith('display "') && !trimmed.endsWith('"')) {
+            return line + '"';
+        }
+        
+        // Fix missing space after display
+        if (trimmed.startsWith('display') && trimmed.length > 7 && trimmed[7] !== ' ') {
+            return line.replace('display', 'display ');
+        }
+        
+        return line;
+    });
+    
+    return fixed.join('\n');
+}
 
-app.post('/run', async (req, res) => {
-    const { code } = req.body;
-    if (typeof code !== 'string') {
-        return res.status(400).json({ error: 'code (string) is required' });
-    }
+// --- MOUNT ROUTES ---
+// This is the main export. PolyServer calls this to mount VS-Sharp routes.
+function mountRoutes(app, basePath) {
+    const prefix = basePath || '';
+    
+    // --- VERSCRIPT CODE RUNNER ---
+    const VERSCRIPT_BIN = path.join(__dirname, 'verscript');
 
-    // Write code to a temp file
-    const tmpFile = path.join(os.tmpdir(), `vs_${Date.now()}_${Math.random().toString(36).slice(2)}.vrs`);
-    try {
-        fs.writeFileSync(tmpFile, code, 'utf8');
-    } catch (err) {
-        return res.status(500).json({ error: 'Failed to write temp file', detail: err.message });
-    }
-
-    // Check binary exists
-    if (!fs.existsSync(VERSCRIPT_BIN)) {
-        fs.unlinkSync(tmpFile);
-        return res.status(500).json({ error: 'VerScript binary not found on server. Please ensure verscript is deployed.' });
-    }
-
-    // Execute with a 10-second timeout
-    exec(`"${VERSCRIPT_BIN}" "${tmpFile}"`, { timeout: 10000 }, (error, stdout, stderr) => {
-        try { fs.unlinkSync(tmpFile); } catch (_) {}
-
-        if (error && error.killed) {
-            return res.json({ output: stdout || '', error: 'Execution timed out (10s limit).' });
+    app.post(prefix + '/run', async (req, res) => {
+        const { code } = req.body;
+        if (typeof code !== 'string') {
+            return res.status(400).json({ error: 'code (string) is required' });
         }
 
-        res.json({
-            output: stdout || '',
-            error: stderr || (error && !stdout ? error.message : '') || ''
+        const tmpFile = path.join(os.tmpdir(), `vs_${Date.now()}_${Math.random().toString(36).slice(2)}.vrs`);
+        try {
+            fs.writeFileSync(tmpFile, code, 'utf8');
+        } catch (err) {
+            return res.status(500).json({ error: 'Failed to write temp file', detail: err.message });
+        }
+
+        if (!fs.existsSync(VERSCRIPT_BIN)) {
+            try { fs.unlinkSync(tmpFile); } catch(_) {}
+            return res.status(500).json({ error: 'VerScript binary not found on server.' });
+        }
+
+        // Ensure binary is executable
+        try { fs.chmodSync(VERSCRIPT_BIN, 0o755); } catch(_) {}
+
+        exec(`"${VERSCRIPT_BIN}" "${tmpFile}"`, { timeout: 10000 }, (error, stdout, stderr) => {
+            try { fs.unlinkSync(tmpFile); } catch (_) {}
+
+            if (error && error.killed) {
+                return res.json({ output: stdout || '', error: 'Execution timed out (10s limit).' });
+            }
+
+            res.json({
+                output: stdout || '',
+                error: stderr || (error && !stdout ? error.message : '') || ''
+            });
         });
     });
-});
 
-// --- HEALTH CHECK ---
-app.get('/ping', (req, res) => {
-    res.send('pong');
-});
-
-app.post('/api/chat', (req, res) => {
-    const { code, message } = req.body;
-    
-    if (!message) {
-        return res.status(400).json({ error: 'Message is required' });
-    }
-
-    console.log(`Received user message: "${message}"`);
-
-    // Load weights dynamically
-    if (!fs.existsSync(WEIGHTS_FILE)) {
-        return res.json({
-            response: "### 🤖 VS# Language Model Initializing\n\nI am currently training my neural network from scratch in the background. Please wait a few seconds and send your message again!",
-            action: null
-        });
-    }
-
-    try {
-        const weightsData = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
-        const responseText = generateLLMResponse(message, weightsData);
+    // --- VS# CHAT API ---
+    app.post(prefix + '/api/chat', (req, res) => {
+        const { code, message } = req.body;
         
-        let actionPayload = null;
-        const codeBlock = extractCodeBlock(responseText);
-        if (codeBlock) {
-            actionPayload = {
-                type: "edit",
-                code: codeBlock
-            };
+        if (!message) {
+            return res.status(400).json({ error: 'Message is required' });
         }
 
-        // Simulate typing delay
-        setTimeout(() => {
-            res.json({
-                response: responseText,
-                action: actionPayload
+        console.log(`[VS#] Received: "${message}"`);
+
+        // Load weights dynamically
+        if (!fs.existsSync(WEIGHTS_FILE)) {
+            return res.json({
+                response: "### VS# Language Model Initializing\n\nI am currently training my neural network from scratch. Please wait and try again!",
+                action: null
             });
-        }, 600);
+        }
 
-    } catch (err) {
-        console.error("Error generating LLM response:", err);
-        res.status(500).json({ error: 'Internal server error running custom LLM.' });
-    }
-});
+        try {
+            const weightsData = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
+            let responseText = generateLLMResponse(message, weightsData);
+            
+            // --- ENHANCED CODE-WRITING LOGIC ---
+            const lowerMsg = message.toLowerCase();
+            let actionPayload = null;
+            
+            // Detect "fix" / "correct" / "debug" intent — analyze and fix user's code
+            const isFixIntent = /\b(fix|correct|debug|repair|syntax)\b/.test(lowerMsg);
+            if (isFixIntent && code && code.trim()) {
+                const fixedCode = fixVerScriptCode(code);
+                if (fixedCode && fixedCode !== code) {
+                    // Append the fixed code block to the LLM response
+                    responseText += "\n\n```verscript\n" + fixedCode + "\n```";
+                }
+            }
+            
+            // Extract code block from response and set edit action
+            const codeBlock = extractCodeBlock(responseText);
+            if (codeBlock) {
+                actionPayload = {
+                    type: "edit",
+                    code: codeBlock
+                };
+            }
 
-app.listen(PORT, () => {
-    console.log(`VS# Helper AI running on port ${PORT}`);
-});
+            // Simulate typing delay
+            setTimeout(() => {
+                res.json({
+                    response: responseText,
+                    action: actionPayload
+                });
+            }, 400);
+
+        } catch (err) {
+            console.error("[VS#] Error generating response:", err);
+            res.status(500).json({ error: 'Internal server error running custom LLM.' });
+        }
+    });
+}
+
+module.exports = { mountRoutes };
