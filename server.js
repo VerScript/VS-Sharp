@@ -8,9 +8,9 @@ const { exec } = require('child_process');
 const os = require('os');
 
 const WEIGHTS_FILE = path.join(__dirname, 'model_weights.json');
-const CONTEXT_WINDOW = 3;
-const EMBED_DIM = 16;
-const HIDDEN_SIZE = 32;
+const CONTEXT_WINDOW = 8;
+const EMBED_DIM = 32;
+const HIDDEN_SIZE = 64;
 
 // --- TOKENIZER ---
 function tokenize(text) {

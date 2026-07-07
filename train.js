@@ -2,9 +2,9 @@ const fs = require('fs');
 const path = require('path');
 
 // --- LLM HYPERPARAMETERS ---
-const EMBED_DIM = 16;
-const CONTEXT_WINDOW = 3;
-const HIDDEN_SIZE = 32;
+const EMBED_DIM = 32;
+const CONTEXT_WINDOW = 8;
+const HIDDEN_SIZE = 64;
 const LEARNING_RATE = 0.02;
 const SAVE_INTERVAL_EPOCHS = 10;
 const DATA_FILE = path.join(__dirname, 'knowledge', 'training_data.json');
