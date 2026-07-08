@@ -110,8 +110,8 @@ function generateLLMResponse(message, weightsData) {
         // Forward pass to get probs
         const probs = forward(context, weights);
 
-        // Softmax sampling with low temperature
-        const temp = 0.3;
+        // Softmax sampling with temperature
+        const temp = 0.7;
         const logProbs = probs.map(p => Math.log(p + 1e-10) / temp);
         const maxLog = Math.max(...logProbs);
         const tempExps = logProbs.map(lp => Math.exp(lp - maxLog));
@@ -142,12 +142,28 @@ function generateLLMResponse(message, weightsData) {
         if (t === '\n') {
             responseText += '\n';
         } else {
-            if (responseText.length > 0 && !responseText.endsWith('\n') && t !== '.' && t !== ',' && t !== '!' && t !== '?') {
+            if (responseText.length > 0 &&
+                !responseText.endsWith('\n') &&
+                !responseText.endsWith('`') &&
+                t !== '.' &&
+                t !== ',' &&
+                t !== '!' &&
+                t !== '?' &&
+                t !== ':' &&
+                t !== ';') {
                 responseText += ' ';
             }
             responseText += t;
         }
     });
+
+    responseText = responseText.replace(/` ` `/g, '```');
+    responseText = responseText.replace(/``` verscript/gi, '```verscript');
+    responseText = responseText.replace(/# # #/g, '###');
+    responseText = responseText.replace(/" ([^"]+) "/g, '"$1"');
+    responseText = responseText.replace(/(\d)\!/g, '$1 !');
+    responseText = responseText.replace(/(\w+)\:/g, '$1 :');
+    responseText = responseText.replace(/"!/g, '" !');
 
     return responseText;
 }
