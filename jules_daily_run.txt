@@ -5,3 +5,5 @@ Jules Daily Run - Summary
 - No critical security vulnerabilities were detected (`npm audit` reported 0 vulnerabilities).
 - Identified an outdated dependency: `@google/genai` (2.8.0).
 - Action taken: Updated `@google/genai` to version 2.10.0 in `package.json` and updated `package-lock.json`.
+- Restored custom JavaScript MLP (VS#) implementation in server.js due to repository constraints forbidding external API ML wrappers.
+- Removed @google/genai from dependencies.
