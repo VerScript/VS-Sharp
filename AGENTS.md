@@ -13,10 +13,10 @@ Instructions and context for autonomous AI coding agents (such as Google Jules).
 - **Stop Command**: To stop training safely, run the PowerShell script `.\stop-training.ps1` or write a `stop_training.txt` file in the directory.
 - **Shared Weights State**: Saves checkpoints dynamically to `model_weights.json`.
 - **Model Architecture**: Multi-Layer Perceptron (MLP) built completely from scratch using standard JavaScript (no TensorFlow/PyTorch).
-  - `E` (Embeddings): size `[vocab_size, EMBED_DIM (16)]`
-  - `W1` (Hidden weights): size `[CONTEXT_WINDOW (3) * EMBED_DIM (16), HIDDEN_SIZE (32)]`
-  - `b1` (Hidden biases): size `[HIDDEN_SIZE (32)]`
-  - `W2` (Output weights): size `[HIDDEN_SIZE (32), vocab_size]`
+  - `E` (Embeddings): size `[vocab_size, EMBED_DIM (32)]`
+  - `W1` (Hidden weights): size `[CONTEXT_WINDOW (8) * EMBED_DIM (32), HIDDEN_SIZE (64)]`
+  - `b1` (Hidden biases): size `[HIDDEN_SIZE (64)]`
+  - `W2` (Output weights): size `[HIDDEN_SIZE (64), vocab_size]`
   - `b2` (Output biases): size `[vocab_size]`
 
 ## ⚙️ Path Resolution Rules
