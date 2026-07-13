@@ -9,3 +9,7 @@ Jules Daily Run - Additional Findings (Standalone Server Bugfix)
 - Discovered and fixed a bug in `server.js` where running it standalone (`node server.js`) did not start the express server because the `app.listen` block was missing.
 - Appended `if (require.main === module)` block to `server.js` allowing successful standalone testing.
 - Ran `npm audit` and verified that 0 vulnerabilities were found.
+Jules Daily Run - Additional Findings (Tokenizer and GitHub Action Bugfix)
+- Fixed tokenizer bug in `server.js` to correctly normalize `\r\n` to `\n` matching the behavior in `train.js` to prevent index mismatch errors.
+- Updated `.github/workflows/jules.yml` to use the correct action `google-labs-code/jules-invoke@v1.0.0`.
+- Ran `npm audit` and verified that 0 vulnerabilities were found.
