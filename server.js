@@ -17,8 +17,13 @@ function tokenize(text) {
     const tokens = [];
     const regex = /(\r?\n|\w+|[^\w\s])/g;
     let match;
-    while ((match = regex.exec(text.toLowerCase())) !== null) {
-        tokens.push(match[0]);
+    while ((match = regex.exec(text)) !== null) {
+        let t = match[0];
+        if (t === '\r\n' || t === '\n') {
+            tokens.push('\n');
+        } else {
+            tokens.push(t.toLowerCase());
+        }
     }
     return tokens;
 }
