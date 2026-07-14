@@ -13,3 +13,6 @@ Jules Daily Run - Additional Findings (Tokenizer and GitHub Action Bugfix)
 - Fixed tokenizer bug in `server.js` to correctly normalize `\r\n` to `\n` matching the behavior in `train.js` to prevent index mismatch errors.
 - Updated `.github/workflows/jules.yml` to use the correct action `google-labs-code/jules-invoke@v1.0.0`.
 - Ran `npm audit` and verified that 0 vulnerabilities were found.
+Jules Daily Run - Additional Findings (Security Improvement)
+- Scanned for bugs and vulnerabilities. `npm audit` returned 0 vulnerabilities.
+- Updated `server.js` to use `execFile` instead of `exec` when running the `verscript` binary via the `/run` endpoint. This prevents potential shell command injection vulnerabilities.
