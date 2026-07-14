@@ -194,20 +194,83 @@ function fixVerScriptCode(code) {
         let trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('!')) return line;
         
-        // Fix unclosed strings in display statements
-        if (trimmed.startsWith('display "') && !trimmed.endsWith('"')) {
-            return line + '"';
+        // 1. Fix missing space after display
+        if (trimmed.startsWith('display') && trimmed.length > 7 && trimmed[7] !== ' ') {
+            line = line.replace('display', 'display ');
+            trimmed = line.trim();
         }
         
-        // Fix missing space after display
-        if (trimmed.startsWith('display') && trimmed.length > 7 && trimmed[7] !== ' ') {
-            return line.replace('display', 'display ');
+        // 2. Fix unclosed strings in display
+        if (trimmed.startsWith('display "') && !trimmed.endsWith('"')) {
+            line = line + '"';
+            trimmed = line.trim();
+        }
+
+        // 3. Fix double equals used for assignment or comparison
+        if (trimmed.includes('==')) {
+            line = line.replace(/==/g, '=');
+            trimmed = line.trim();
+        }
+
+        // 4. Fix assignment with '=' or ':=' instead of ':'
+        const assignmentMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(:=|=)\s*(.*)$/);
+        const hasKeyword = /^(display|prompt|loop|iterate|if|while|until|do|unless|throw|ForceErrors|CriticalErrors|SuppressErrors|else|external|internal|error)(\s|$)/.test(trimmed);
+        if (assignmentMatch && !hasKeyword) {
+            const varName = assignmentMatch[1];
+            const varVal = assignmentMatch[3];
+            const indent = line.substring(0, line.indexOf(trimmed));
+            line = `${indent}${varName} : ${varVal}`;
         }
         
         return line;
     });
     
     return fixed.join('\n');
+}
+
+function addCommentsToCode(code) {
+    if (!code) return "";
+    const lines = code.split('\n');
+    return lines.map(line => {
+        let trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('!')) return line;
+        if (trimmed.includes('!')) return line; // already commented
+        
+        let comment = "";
+        if (trimmed.startsWith('display')) {
+            comment = "Output to stdout";
+        } else if (trimmed.startsWith('prompt')) {
+            comment = "Read user input";
+        } else if (trimmed.startsWith('loop')) {
+            comment = "Loop block execution";
+        } else if (trimmed.startsWith('iterate')) {
+            comment = "Iterate loop variable";
+        } else if (trimmed.includes(':')) {
+            comment = "Variable assignment";
+        } else if (trimmed.startsWith('if')) {
+            comment = "Conditional guard";
+        } else if (trimmed.startsWith('while')) {
+            comment = "While loop guard";
+        } else if (trimmed.startsWith('until')) {
+            comment = "Until loop guard";
+        } else if (trimmed.startsWith('do')) {
+            comment = "Start try block";
+        } else if (trimmed.startsWith('unless')) {
+            comment = "Error/condition catch guard";
+        } else if (trimmed.startsWith('throw')) {
+            comment = "Throw exception";
+        } else if (trimmed.startsWith('SuppressErrors')) {
+            comment = "Enter error suppression scope";
+        } else if (trimmed.startsWith('CriticalErrors')) {
+            comment = "Enter critical error filter scope";
+        } else if (trimmed.startsWith('ForceErrors')) {
+            comment = "Enter force error scope";
+        } else {
+            comment = "Execute expression";
+        }
+        
+        return `${line} ! ${comment}`;
+    }).join('\n');
 }
 
 // --- MOUNT ROUTES ---
@@ -282,23 +345,41 @@ function mountRoutes(app, basePath) {
             const lowerMsg = message.toLowerCase();
             let actionPayload = null;
             
-            // Detect "fix" / "correct" / "debug" intent — analyze and fix user's code
-            const isFixIntent = /\b(fix|correct|debug|repair|syntax)\b/.test(lowerMsg);
-            if (isFixIntent && code && code.trim()) {
-                const fixedCode = fixVerScriptCode(code);
-                if (fixedCode && fixedCode !== code) {
-                    // Append the fixed code block to the LLM response
-                    responseText += "\n\n```verscript\n" + fixedCode + "\n```";
-                }
-            }
-            
-            // Extract code block from response and set edit action
-            const codeBlock = extractCodeBlock(responseText);
-            if (codeBlock) {
+            if (lowerMsg.includes("add description comments") || lowerMsg.includes("add comments")) {
+                const commented = addCommentsToCode(code || "");
+                responseText = "### VS# AI Code Annotator\n\nI have added line-by-line description comments explaining each instruction in your code:";
                 actionPayload = {
                     type: "edit",
-                    code: codeBlock
+                    code: commented
                 };
+            }
+            else if (lowerMsg.includes("remove errors") || lowerMsg.includes("remove syntax errors") || lowerMsg.includes("fix syntax errors")) {
+                const fixedCode = fixVerScriptCode(code || "");
+                responseText = "### VS# AI Syntax Repair\n\nI scanned the code and repaired assignment operators, unclosed strings, and comparison formats to match VerScript standards:";
+                actionPayload = {
+                    type: "edit",
+                    code: fixedCode
+                };
+            }
+            else {
+                // Detect "fix" / "correct" / "debug" intent — analyze and fix user's code
+                const isFixIntent = /\b(fix|correct|debug|repair|syntax)\b/.test(lowerMsg);
+                if (isFixIntent && code && code.trim()) {
+                    const fixedCode = fixVerScriptCode(code);
+                    if (fixedCode && fixedCode !== code) {
+                        // Append the fixed code block to the LLM response
+                        responseText += "\n\n```verscript\n" + fixedCode + "\n```";
+                    }
+                }
+                
+                // Extract code block from response and set edit action
+                const codeBlock = extractCodeBlock(responseText);
+                if (codeBlock) {
+                    actionPayload = {
+                        type: "edit",
+                        code: codeBlock
+                    };
+                }
             }
 
             // Simulate typing delay
