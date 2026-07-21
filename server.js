@@ -214,7 +214,7 @@ function fixVerScriptCode(code) {
 
         // 4. Fix assignment with '=' or ':=' instead of ':'
         const assignmentMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(:=|=)\s*(.*)$/);
-        const hasKeyword = /^(display|prompt|loop|iterate|if|while|until|do|unless|throw|ForceErrors|CriticalErrors|SuppressErrors|else|external|internal|error)(\s|$)/.test(trimmed);
+        const hasKeyword = /^(display|prompt|loop|iterate|if|while|until|do|unless|throw|ForceErrors|CriticalErrors|SuppressErrors|else|external|internal|error|step)(\s|$)/.test(trimmed);
         if (assignmentMatch && !hasKeyword) {
             const varName = assignmentMatch[1];
             const varVal = assignmentMatch[3];
@@ -242,9 +242,9 @@ function addCommentsToCode(code) {
         } else if (trimmed.startsWith('prompt')) {
             comment = "Read user input";
         } else if (trimmed.startsWith('loop')) {
-            comment = "Loop block execution";
+            comment = trimmed.includes('step') ? "Loop block execution with step constraint" : "Loop block execution";
         } else if (trimmed.startsWith('iterate')) {
-            comment = "Iterate loop variable";
+            comment = trimmed.includes('step') ? "Iterate loop variable with step constraint" : "Iterate loop variable";
         } else if (trimmed.includes(':')) {
             comment = "Variable assignment";
         } else if (trimmed.startsWith('if')) {
