@@ -214,7 +214,7 @@ function fixVerScriptCode(code) {
 
         // 4. Fix assignment with '=' or ':=' instead of ':'
         const assignmentMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(:=|=)\s*(.*)$/);
-        const hasKeyword = /^(display|prompt|loop|iterate|if|while|until|do|unless|throw|ForceErrors|CriticalErrors|SuppressErrors|else|external|internal|error|step)(\s|$)/.test(trimmed);
+        const hasKeyword = /^(display|prompt|loop|iterate|if|while|until|do|unless|throw|ForceErrors|CriticalErrors|SuppressErrors|else|external|internal|error|step)\b/.test(trimmed);
         if (assignmentMatch && !hasKeyword) {
             const varName = assignmentMatch[1];
             const varVal = assignmentMatch[3];
