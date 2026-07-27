@@ -195,13 +195,13 @@ function fixVerScriptCode(code) {
         if (!trimmed || trimmed.startsWith('!')) return line;
         
         // 1. Fix missing space after display
-        if (trimmed.startsWith('display') && trimmed.length > 7 && trimmed[7] !== ' ') {
+        if (/^display[^a-zA-Z0-9_\s]/.test(trimmed)) {
             line = line.replace('display', 'display ');
             trimmed = line.trim();
         }
         
         // 2. Fix unclosed strings in display
-        if (trimmed.startsWith('display "') && !trimmed.endsWith('"')) {
+        if (/^display\b/.test(trimmed) && trimmed.includes('"') && !trimmed.endsWith('"')) {
             line = line + '"';
             trimmed = line.trim();
         }
@@ -237,33 +237,33 @@ function addCommentsToCode(code) {
         if (trimmed.includes('!')) return line; // already commented
         
         let comment = "";
-        if (trimmed.startsWith('display')) {
+        if (/^display\b/.test(trimmed)) {
             comment = "Output to stdout";
-        } else if (trimmed.startsWith('prompt')) {
+        } else if (/^prompt\b/.test(trimmed)) {
             comment = "Read user input";
-        } else if (trimmed.startsWith('loop')) {
+        } else if (/^loop\b/.test(trimmed)) {
             comment = trimmed.includes('step') ? "Loop block execution with step constraint" : "Loop block execution";
-        } else if (trimmed.startsWith('iterate')) {
+        } else if (/^iterate\b/.test(trimmed)) {
             comment = trimmed.includes('step') ? "Iterate loop variable with step constraint" : "Iterate loop variable";
         } else if (trimmed.includes(':')) {
             comment = "Variable assignment";
-        } else if (trimmed.startsWith('if')) {
+        } else if (/^if\b/.test(trimmed)) {
             comment = "Conditional guard";
-        } else if (trimmed.startsWith('while')) {
+        } else if (/^while\b/.test(trimmed)) {
             comment = "While loop guard";
-        } else if (trimmed.startsWith('until')) {
+        } else if (/^until\b/.test(trimmed)) {
             comment = "Until loop guard";
-        } else if (trimmed.startsWith('do')) {
+        } else if (/^do\b/.test(trimmed)) {
             comment = "Start try block";
-        } else if (trimmed.startsWith('unless')) {
+        } else if (/^unless\b/.test(trimmed)) {
             comment = "Error/condition catch guard";
-        } else if (trimmed.startsWith('throw')) {
+        } else if (/^throw\b/.test(trimmed)) {
             comment = "Throw exception";
-        } else if (trimmed.startsWith('SuppressErrors')) {
+        } else if (/^SuppressErrors\b/.test(trimmed)) {
             comment = "Enter error suppression scope";
-        } else if (trimmed.startsWith('CriticalErrors')) {
+        } else if (/^CriticalErrors\b/.test(trimmed)) {
             comment = "Enter critical error filter scope";
-        } else if (trimmed.startsWith('ForceErrors')) {
+        } else if (/^ForceErrors\b/.test(trimmed)) {
             comment = "Enter force error scope";
         } else {
             comment = "Execute expression";
