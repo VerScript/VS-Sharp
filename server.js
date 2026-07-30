@@ -245,8 +245,6 @@ function addCommentsToCode(code) {
             comment = trimmed.includes('step') ? "Loop block execution with step constraint" : "Loop block execution";
         } else if (/^iterate\b/.test(trimmed)) {
             comment = trimmed.includes('step') ? "Iterate loop variable with step constraint" : "Iterate loop variable";
-        } else if (trimmed.includes(':')) {
-            comment = "Variable assignment";
         } else if (/^if\b/.test(trimmed)) {
             comment = "Conditional guard";
         } else if (/^while\b/.test(trimmed)) {
@@ -265,6 +263,8 @@ function addCommentsToCode(code) {
             comment = "Enter critical error filter scope";
         } else if (/^ForceErrors\b/.test(trimmed)) {
             comment = "Enter force error scope";
+        } else if (trimmed.includes(':')) {
+            comment = "Variable assignment";
         } else {
             comment = "Execute expression";
         }
