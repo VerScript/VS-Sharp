@@ -201,7 +201,7 @@ function fixVerScriptCode(code) {
         }
         
         // 2. Fix unclosed strings in display
-        if (/^display\b/.test(trimmed) && trimmed.includes('"') && !trimmed.endsWith('"')) {
+        if (/^display\b/.test(trimmed) && (trimmed.match(/"/g) || []).length % 2 !== 0) {
             line = line + '"';
             trimmed = line.trim();
         }
