@@ -183,7 +183,17 @@ function extractCodeBlock(text) {
     const fallbackMatch = text.match(fallbackRegex);
     return fallbackMatch ? fallbackMatch[1].trim() : null;
 }
-
+function hasInlineComment(line) {
+    let inString = false;
+    for (let i = 0; i < line.length; i++) {
+        if (line[i] === '"') {
+            inString = !inString;
+        } else if (line[i] === '!' && !inString) {
+            return i;
+        }
+    }
+    return -1;
+}
 // --- SMART CODE FIX ---
 // Analyzes user code and fixes common VerScript errors
 function fixVerScriptCode(code) {
@@ -193,20 +203,26 @@ function fixVerScriptCode(code) {
     const fixed = lines.map(line => {
         let trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('!')) return line;
+
+        let commentIdx = hasInlineComment(trimmed);
+        let codePart = commentIdx !== -1 ? trimmed.substring(0, commentIdx).trim() : trimmed;
         
         // 1. Fix missing space after display
-        if (/^display[^a-zA-Z0-9_\s]/.test(trimmed)) {
+        if (/^display[^a-zA-Z0-9_\s]/.test(codePart)) {
             line = line.replace('display', 'display ');
             trimmed = line.trim();
+            commentIdx = hasInlineComment(trimmed);
+            codePart = commentIdx !== -1 ? trimmed.substring(0, commentIdx).trim() : trimmed;
         }
         
         // 2. Fix unclosed strings in display
-        if (/^display\b/.test(trimmed) && (trimmed.match(/"/g) || []).length % 2 !== 0) {
+        if (/^display\b/.test(codePart) && (codePart.match(/"/g) || []).length % 2 !== 0) {
             line = line + '"';
             trimmed = line.trim();
         }
 
         // 3. Fix double equals used for assignment or comparison
+
         if (trimmed.includes('==')) {
             line = line.replace(/==/g, '=');
             trimmed = line.trim();
@@ -234,7 +250,9 @@ function addCommentsToCode(code) {
     return lines.map(line => {
         let trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('!')) return line;
-        if (trimmed.includes('!')) return line; // already commented
+
+        const commentIdx = hasInlineComment(trimmed);
+        if (commentIdx !== -1) return line; // already commented
         
         let comment = "";
         if (/^display\b/.test(trimmed)) {
