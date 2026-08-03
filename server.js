@@ -224,7 +224,23 @@ function fixVerScriptCode(code) {
         // 3. Fix double equals used for assignment or comparison
 
         if (trimmed.includes('==')) {
-            line = line.replace(/==/g, '=');
+            let inString = false;
+            let newLine = "";
+            for (let i = 0; i < line.length; i++) {
+                if (line[i] === '"') {
+                    inString = !inString;
+                    newLine += line[i];
+                } else if (!inString && line[i] === '!') {
+                    newLine += line.substring(i);
+                    break;
+                } else if (!inString && line[i] === '=' && line[i+1] === '=') {
+                    newLine += '=';
+                    i++;
+                } else {
+                    newLine += line[i];
+                }
+            }
+            line = newLine;
             trimmed = line.trim();
         }
 
@@ -281,10 +297,22 @@ function addCommentsToCode(code) {
             comment = "Enter critical error filter scope";
         } else if (/^ForceErrors\b/.test(trimmed)) {
             comment = "Enter force error scope";
-        } else if (trimmed.includes(':')) {
-            comment = "Variable assignment";
         } else {
-            comment = "Execute expression";
+            let hasAssign = false;
+            let inString = false;
+            for (let i = 0; i < trimmed.length; i++) {
+                if (trimmed[i] === '"') {
+                    inString = !inString;
+                } else if (!inString && trimmed[i] === ':') {
+                    hasAssign = true;
+                    break;
+                }
+            }
+            if (hasAssign) {
+                comment = "Variable assignment";
+            } else {
+                comment = "Execute expression";
+            }
         }
         
         return `${line} ! ${comment}`;
