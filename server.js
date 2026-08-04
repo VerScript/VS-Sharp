@@ -194,6 +194,32 @@ function hasInlineComment(line) {
     }
     return -1;
 }
+function includesOutsideString(line, searchStr) {
+    let inString = false;
+    for (let i = 0; i <= line.length - searchStr.length; i++) {
+        if (line[i] === '"') {
+            inString = !inString;
+        } else if (!inString && line[i] === '!') {
+            return false;
+        } else if (!inString && line.substring(i, i + searchStr.length) === searchStr) {
+            return true;
+        }
+    }
+    return false;
+}
+function replaceOutsideString(line, searchStr, replaceStr) {
+    let inString = false;
+    for (let i = 0; i <= line.length - searchStr.length; i++) {
+        if (line[i] === '"') {
+            inString = !inString;
+        } else if (!inString && line[i] === '!') {
+            break;
+        } else if (!inString && line.substring(i, i + searchStr.length) === searchStr) {
+            return line.substring(0, i) + replaceStr + line.substring(i + searchStr.length);
+        }
+    }
+    return line;
+}
 // --- SMART CODE FIX ---
 // Analyzes user code and fixes common VerScript errors
 function fixVerScriptCode(code) {
@@ -209,7 +235,7 @@ function fixVerScriptCode(code) {
         
         // 1. Fix missing space after display
         if (/^display[^a-zA-Z0-9_\s]/.test(codePart)) {
-            line = line.replace('display', 'display ');
+            line = replaceOutsideString(line, 'display', 'display ');
             trimmed = line.trim();
             commentIdx = hasInlineComment(trimmed);
             codePart = commentIdx !== -1 ? trimmed.substring(0, commentIdx).trim() : trimmed;
@@ -223,7 +249,7 @@ function fixVerScriptCode(code) {
 
         // 3. Fix double equals used for assignment or comparison
 
-        if (trimmed.includes('==')) {
+        if (includesOutsideString(trimmed, '==')) {
             let inString = false;
             let newLine = "";
             for (let i = 0; i < line.length; i++) {
@@ -276,9 +302,9 @@ function addCommentsToCode(code) {
         } else if (/^prompt\b/.test(trimmed)) {
             comment = "Read user input";
         } else if (/^loop\b/.test(trimmed)) {
-            comment = trimmed.includes('step') ? "Loop block execution with step constraint" : "Loop block execution";
+            comment = includesOutsideString(trimmed, 'step') ? "Loop block execution with step constraint" : "Loop block execution";
         } else if (/^iterate\b/.test(trimmed)) {
-            comment = trimmed.includes('step') ? "Iterate loop variable with step constraint" : "Iterate loop variable";
+            comment = includesOutsideString(trimmed, 'step') ? "Iterate loop variable with step constraint" : "Iterate loop variable";
         } else if (/^if\b/.test(trimmed)) {
             comment = "Conditional guard";
         } else if (/^while\b/.test(trimmed)) {
