@@ -194,7 +194,7 @@ function hasInlineComment(line) {
     }
     return -1;
 }
-function includesOutsideString(line, searchStr) {
+function includesOutsideString(line, searchStr, requireWordBoundary = false) {
     let inString = false;
     for (let i = 0; i <= line.length - searchStr.length; i++) {
         if (line[i] === '"') {
@@ -202,7 +202,16 @@ function includesOutsideString(line, searchStr) {
         } else if (!inString && line[i] === '!') {
             return false;
         } else if (!inString && line.substring(i, i + searchStr.length) === searchStr) {
-            return true;
+            if (requireWordBoundary) {
+                const prevChar = i > 0 ? line[i - 1] : '';
+                const nextChar = i + searchStr.length < line.length ? line[i + searchStr.length] : '';
+                const isWordChar = (char) => /[a-zA-Z0-9_]/.test(char);
+                if (!isWordChar(prevChar) && !isWordChar(nextChar)) {
+                    return true;
+                }
+            } else {
+                return true;
+            }
         }
     }
     return false;
@@ -302,9 +311,9 @@ function addCommentsToCode(code) {
         } else if (/^prompt\b/.test(trimmed)) {
             comment = "Read user input";
         } else if (/^loop\b/.test(trimmed)) {
-            comment = includesOutsideString(trimmed, 'step') ? "Loop block execution with step constraint" : "Loop block execution";
+            comment = includesOutsideString(trimmed, 'step', true) ? "Loop block execution with step constraint" : "Loop block execution";
         } else if (/^iterate\b/.test(trimmed)) {
-            comment = includesOutsideString(trimmed, 'step') ? "Iterate loop variable with step constraint" : "Iterate loop variable";
+            comment = includesOutsideString(trimmed, 'step', true) ? "Iterate loop variable with step constraint" : "Iterate loop variable";
         } else if (/^if\b/.test(trimmed)) {
             comment = "Conditional guard";
         } else if (/^while\b/.test(trimmed)) {
