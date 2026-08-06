@@ -162,13 +162,57 @@ function generateLLMResponse(message, weightsData) {
         }
     });
 
-    responseText = responseText.replace(/` ` `/g, '```');
-    responseText = responseText.replace(/``` verscript/gi, '```verscript');
+    responseText = responseText.replace(/\x60 \x60 \x60/g, '\x60\x60\x60');
+    responseText = responseText.replace(/\x60\x60\x60 verscript/gi, '\x60\x60\x60verscript');
     responseText = responseText.replace(/# # #/g, '###');
-    responseText = responseText.replace(/" ([^"]+) "/g, '"$1"');
-    responseText = responseText.replace(/(\d)\!/g, '$1 !');
-    responseText = responseText.replace(/(\w+)\:/g, '$1 :');
-    responseText = responseText.replace(/"!/g, '" !');
+
+    let newResponse = "";
+    let inString = false;
+    let inComment = false;
+    for (let i = 0; i < responseText.length; i++) {
+        let char = responseText[i];
+
+        if (char === '\n') {
+            inString = false;
+            inComment = false;
+            newResponse += char;
+            continue;
+        }
+
+        if (char === '"' && !inComment) {
+            inString = !inString;
+            newResponse += char;
+            continue;
+        }
+
+        if (char === '!' && !inString && !inComment) {
+            inComment = true;
+            if (newResponse.length > 0) {
+                let prev = newResponse[newResponse.length - 1];
+                if ((/[0-9]/.test(prev) || prev === '"') && prev !== ' ') {
+                    newResponse += ' ';
+                }
+            }
+            newResponse += char;
+            continue;
+        }
+
+        if (!inString && !inComment) {
+            if (char === ':') {
+                if (newResponse.length > 0) {
+                    let prev = newResponse[newResponse.length - 1];
+                    if (/[a-zA-Z0-9_]/.test(prev)) {
+                        newResponse += ' ';
+                    }
+                }
+                newResponse += char;
+                continue;
+            }
+        }
+
+        newResponse += char;
+    }
+    responseText = newResponse.replace(/" ([^"]+) "/g, '"$1"');
 
     return responseText;
 }
