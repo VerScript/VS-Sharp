@@ -180,8 +180,19 @@ function generateLLMResponse(message, weightsData) {
         }
 
         if (char === '"' && !inComment) {
-            inString = !inString;
-            newResponse += char;
+            if (!inString) {
+                inString = true;
+                newResponse += char;
+                if (i + 1 < responseText.length && responseText[i + 1] === ' ') {
+                    i++;
+                }
+            } else {
+                inString = false;
+                if (newResponse.endsWith(' ')) {
+                    newResponse = newResponse.slice(0, -1);
+                }
+                newResponse += char;
+            }
             continue;
         }
 
@@ -212,7 +223,7 @@ function generateLLMResponse(message, weightsData) {
 
         newResponse += char;
     }
-    responseText = newResponse.replace(/" ([^"]+) "/g, '"$1"');
+    responseText = newResponse;
 
     return responseText;
 }
