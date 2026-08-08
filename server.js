@@ -8,9 +8,9 @@ const { execFile } = require('child_process');
 const os = require('os');
 
 const WEIGHTS_FILE = path.join(__dirname, 'model_weights.json');
-const CONTEXT_WINDOW = 8;
-const EMBED_DIM = 32;
-const HIDDEN_SIZE = 64;
+const CONTEXT_WINDOW = 32;
+const EMBED_DIM = 128;
+const HIDDEN_SIZE = 256;
 
 // --- TOKENIZER ---
 function tokenize(text) {
@@ -35,43 +35,56 @@ function forward(contextIdxs, weights) {
     const D = EMBED_DIM;
     const H = HIDDEN_SIZE;
     const V = b2.length;
+    const vocabSize = E.length / D;
 
     // 1. Concatenate Embeddings
-    const x = new Array(C * D);
+    const x = new Float32Array(C * D);
     for (let c = 0; c < C; c++) {
         const idx = contextIdxs[c];
-        const safeIdx = (idx >= 0 && idx < E.length) ? idx : 0;
-        const emb = E[safeIdx];
+        const safeIdx = (idx >= 0 && idx < vocabSize) ? idx : 0;
+        const embOffset = safeIdx * D;
         for (let d = 0; d < D; d++) {
-            x[c * D + d] = emb[d];
+            x[c * D + d] = E[embOffset + d];
         }
     }
 
     // 2. Hidden Layer: h = tanh(x * W1 + b1)
-    const h = new Array(H);
+    const h = new Float32Array(H);
     for (let j = 0; j < H; j++) {
         let sum = b1[j];
         for (let i = 0; i < C * D; i++) {
-            sum += x[i] * W1[i][j];
+            sum += x[i] * W1[i * H + j];
         }
         h[j] = Math.tanh(sum);
     }
 
     // 3. Output Logits: logits = h * W2 + b2
-    const logits = new Array(V);
+    const logits = new Float32Array(V);
     for (let k = 0; k < V; k++) {
         let sum = b2[k];
         for (let j = 0; j < H; j++) {
-            sum += h[j] * W2[j][k];
+            sum += h[j] * W2[j * V + k];
         }
         logits[k] = sum;
     }
 
     // 4. Softmax
-    const max = Math.max(...logits);
-    const exps = logits.map(v => Math.exp(v - max));
-    const sumExps = exps.reduce((a, b) => a + b, 0);
-    const probs = exps.map(v => v / (sumExps || 1e-10));
+    let max = -Infinity;
+    for (let k = 0; k < V; k++) {
+        if (logits[k] > max) max = logits[k];
+    }
+    const exps = new Float32Array(V);
+    let sumExps = 0;
+    for (let k = 0; k < V; k++) {
+        exps[k] = Math.exp(logits[k] - max);
+        sumExps += exps[k];
+    }
+
+    // PolyServer needs standard array here
+    const probs = new Array(V);
+    for (let k = 0; k < V; k++) {
+        probs[k] = exps[k] / (sumExps || 1e-10);
+    }
 
     return probs;
 }
@@ -494,7 +507,19 @@ function mountRoutes(app, basePath) {
         }
 
         try {
-            const weightsData = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
+            const weightsDataRaw = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
+            const w = weightsDataRaw.weights;
+            const weightsData = {
+                vocab: weightsDataRaw.vocab,
+                weights: {
+                    E: new Float32Array(Object.values(w.E)),
+                    W1: new Float32Array(Object.values(w.W1)),
+                    b1: new Float32Array(Object.values(w.b1)),
+                    W2: new Float32Array(Object.values(w.W2)),
+                    b2: new Float32Array(Object.values(w.b2))
+                }
+            };
+
             let responseText = generateLLMResponse(message, weightsData);
 
             // --- ENHANCED CODE-WRITING LOGIC ---
