@@ -162,10 +162,6 @@ function generateLLMResponse(message, weightsData) {
         }
     });
 
-    responseText = responseText.replace(/\x60 \x60 \x60/g, '\x60\x60\x60');
-    responseText = responseText.replace(/\x60\x60\x60 verscript/gi, '\x60\x60\x60verscript');
-    responseText = responseText.replace(/# # #/g, '###');
-
     let newResponse = "";
     let inString = false;
     let inComment = false;
@@ -209,6 +205,30 @@ function generateLLMResponse(message, weightsData) {
         }
 
         if (!inString && !inComment) {
+            if (char === '#' && responseText.substring(i, i + 5) === '# # #') {
+                newResponse += '###';
+                i += 4;
+                continue;
+            }
+
+            if (char === '\x60') {
+                if (responseText.substring(i, i + 5) === '\x60 \x60 \x60') {
+                    newResponse += '\x60\x60\x60';
+                    if (responseText.substring(i + 5, i + 15).toLowerCase() === ' verscript') {
+                        newResponse += 'verscript';
+                        i += 14;
+                    } else {
+                        i += 4;
+                    }
+                    continue;
+                }
+                if (responseText.substring(i, i + 13).toLowerCase() === '\x60\x60\x60 verscript') {
+                    newResponse += '\x60\x60\x60verscript';
+                    i += 12;
+                    continue;
+                }
+            }
+
             if (char === ':') {
                 if (newResponse.length > 0) {
                     let prev = newResponse[newResponse.length - 1];
