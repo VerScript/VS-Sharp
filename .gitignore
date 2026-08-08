@@ -2,3 +2,5 @@ node_modules/
 .env
 *.log
 server.log
+node_modules/
+model_weights.json
