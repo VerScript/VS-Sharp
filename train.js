@@ -2,9 +2,9 @@ const fs = require('fs');
 const path = require('path');
 
 // --- LLM HYPERPARAMETERS ---
-const EMBED_DIM = 32;
-const CONTEXT_WINDOW = 8;
-const HIDDEN_SIZE = 64;
+const EMBED_DIM = 256;
+const CONTEXT_WINDOW = 32;
+const HIDDEN_SIZE = 512;
 const LEARNING_RATE = 0.02;
 const SAVE_INTERVAL_EPOCHS = 10;
 const DATA_FILE = path.join(__dirname, 'knowledge', 'training_data.json');
@@ -30,17 +30,19 @@ function tokenize(text) {
 // --- INITIALIZE WEIGHTS ---
 function initRandomWeights(vocabSize) {
     const scale = 0.1;
-    const E = Array.from({ length: vocabSize }, () => 
-        Array.from({ length: EMBED_DIM }, () => (Math.random() - 0.5) * scale)
-    );
-    const W1 = Array.from({ length: CONTEXT_WINDOW * EMBED_DIM }, () => 
-        Array.from({ length: HIDDEN_SIZE }, () => (Math.random() - 0.5) * scale)
-    );
-    const b1 = new Array(HIDDEN_SIZE).fill(0);
-    const W2 = Array.from({ length: HIDDEN_SIZE }, () => 
-        Array.from({ length: vocabSize }, () => (Math.random() - 0.5) * scale)
-    );
-    const b2 = new Array(vocabSize).fill(0);
+
+    const E = new Float32Array(vocabSize * EMBED_DIM);
+    for (let i = 0; i < E.length; i++) E[i] = (Math.random() - 0.5) * scale;
+
+    const W1 = new Float32Array((CONTEXT_WINDOW * EMBED_DIM) * HIDDEN_SIZE);
+    for (let i = 0; i < W1.length; i++) W1[i] = (Math.random() - 0.5) * scale;
+
+    const b1 = new Float32Array(HIDDEN_SIZE);
+
+    const W2 = new Float32Array(HIDDEN_SIZE * vocabSize);
+    for (let i = 0; i < W2.length; i++) W2[i] = (Math.random() - 0.5) * scale;
+
+    const b2 = new Float32Array(vocabSize);
 
     return { E, W1, b1, W2, b2 };
 }
@@ -54,40 +56,52 @@ function forward(contextIdxs, weights) {
     const V = b2.length;
 
     // 1. Concatenate Embeddings
-    const x = new Array(C * D);
+    const x = new Float32Array(C * D);
     for (let c = 0; c < C; c++) {
         const idx = contextIdxs[c];
-        const emb = E[idx];
+        const embOffset = idx * D;
         for (let d = 0; d < D; d++) {
-            x[c * D + d] = emb[d];
+            x[c * D + d] = E[embOffset + d];
         }
     }
 
     // 2. Hidden Layer: h = tanh(x * W1 + b1)
-    const h = new Array(H);
+    const h = new Float32Array(H);
     for (let j = 0; j < H; j++) {
         let sum = b1[j];
         for (let i = 0; i < C * D; i++) {
-            sum += x[i] * W1[i][j];
+            // W1 dimension: (C*D) x H
+            sum += x[i] * W1[i * H + j];
         }
         h[j] = Math.tanh(sum);
     }
 
     // 3. Output Logits: logits = h * W2 + b2
-    const logits = new Array(V);
+    const logits = new Float32Array(V);
     for (let k = 0; k < V; k++) {
         let sum = b2[k];
         for (let j = 0; j < H; j++) {
-            sum += h[j] * W2[j][k];
+            // W2 dimension: H x V
+            sum += h[j] * W2[j * V + k];
         }
         logits[k] = sum;
     }
 
     // 4. Softmax
-    const max = Math.max(...logits);
-    const exps = logits.map(v => Math.exp(v - max));
-    const sumExps = exps.reduce((a, b) => a + b, 0);
-    const probs = exps.map(v => v / (sumExps || 1e-10));
+    let max = -Infinity;
+    for (let k = 0; k < V; k++) {
+        if (logits[k] > max) max = logits[k];
+    }
+    const exps = new Float32Array(V);
+    let sumExps = 0;
+    for (let k = 0; k < V; k++) {
+        exps[k] = Math.exp(logits[k] - max);
+        sumExps += exps[k];
+    }
+    const probs = new Float32Array(V);
+    for (let k = 0; k < V; k++) {
+        probs[k] = exps[k] / (sumExps || 1e-10);
+    }
 
     return { x, h, probs };
 }
@@ -102,32 +116,32 @@ function backward(contextIdxs, targetIdx, weights, forwardResult) {
     const V = b2.length;
 
     // Output gradients
-    const dLogits = probs.slice();
+    const dLogits = new Float32Array(probs);
     dLogits[targetIdx] -= 1; // gradient of cross entropy loss w.r.t logits
 
     // Output bias gradient
     const db2 = dLogits;
 
     // Output weights gradient: dW2 = h^T * dLogits
-    const dW2 = Array.from({ length: H }, () => new Array(V));
+    const dW2 = new Float32Array(H * V);
     for (let j = 0; j < H; j++) {
         for (let k = 0; k < V; k++) {
-            dW2[j][k] = h[j] * dLogits[k];
+            dW2[j * V + k] = h[j] * dLogits[k];
         }
     }
 
     // dh = dLogits * W2^T
-    const dh = new Array(H).fill(0);
+    const dh = new Float32Array(H);
     for (let j = 0; j < H; j++) {
         let sum = 0;
         for (let k = 0; k < V; k++) {
-            sum += dLogits[k] * W2[j][k];
+            sum += dLogits[k] * W2[j * V + k];
         }
         dh[j] = sum;
     }
 
     // d_hidden_raw = dh * (1 - h^2)
-    const dHiddenRaw = new Array(H);
+    const dHiddenRaw = new Float32Array(H);
     for (let j = 0; j < H; j++) {
         dHiddenRaw[j] = dh[j] * (1 - h[j] * h[j]);
     }
@@ -136,19 +150,19 @@ function backward(contextIdxs, targetIdx, weights, forwardResult) {
     const db1 = dHiddenRaw;
 
     // dW1 = x^T * dHiddenRaw
-    const dW1 = Array.from({ length: C * D }, () => new Array(H));
+    const dW1 = new Float32Array((C * D) * H);
     for (let i = 0; i < C * D; i++) {
         for (let j = 0; j < H; j++) {
-            dW1[i][j] = x[i] * dHiddenRaw[j];
+            dW1[i * H + j] = x[i] * dHiddenRaw[j];
         }
     }
 
     // dx = dHiddenRaw * W1^T
-    const dx = new Array(C * D).fill(0);
+    const dx = new Float32Array(C * D);
     for (let i = 0; i < C * D; i++) {
         let sum = 0;
         for (let j = 0; j < H; j++) {
-            sum += dHiddenRaw[j] * W1[i][j];
+            sum += dHiddenRaw[j] * W1[i * H + j];
         }
         dx[i] = sum;
     }
@@ -158,7 +172,7 @@ function backward(contextIdxs, targetIdx, weights, forwardResult) {
     for (let c = 0; c < C; c++) {
         const idx = contextIdxs[c];
         if (!contextGrads[idx]) {
-            contextGrads[idx] = new Array(D).fill(0);
+            contextGrads[idx] = new Float32Array(D);
         }
         for (let d = 0; d < D; d++) {
             contextGrads[idx][d] += dx[c * D + d];
@@ -173,10 +187,14 @@ function updateWeights(weights, gradients) {
     const { E, W1, b1, W2, b2 } = weights;
     const { dW1, db1, dW2, db2, contextGrads } = gradients;
 
+    const H = HIDDEN_SIZE;
+    const V = b2.length;
+    const CD = W1.length / H;
+
     // W2 update
-    for (let j = 0; j < W2.length; j++) {
-        for (let k = 0; k < W2[j].length; k++) {
-            W2[j][k] -= LEARNING_RATE * dW2[j][k];
+    for (let j = 0; j < H; j++) {
+        for (let k = 0; k < V; k++) {
+            W2[j * V + k] -= LEARNING_RATE * dW2[j * V + k];
         }
     }
     // b2 update
@@ -184,9 +202,9 @@ function updateWeights(weights, gradients) {
         b2[k] -= LEARNING_RATE * db2[k];
     }
     // W1 update
-    for (let i = 0; i < W1.length; i++) {
-        for (let j = 0; j < W1[i].length; j++) {
-            W1[i][j] -= LEARNING_RATE * dW1[i][j];
+    for (let i = 0; i < CD; i++) {
+        for (let j = 0; j < H; j++) {
+            W1[i * H + j] -= LEARNING_RATE * dW1[i * H + j];
         }
     }
     // b1 update
@@ -197,8 +215,9 @@ function updateWeights(weights, gradients) {
     for (const idxStr in contextGrads) {
         const idx = parseInt(idxStr, 10);
         const grad = contextGrads[idx];
+        const embOffset = idx * EMBED_DIM;
         for (let d = 0; d < EMBED_DIM; d++) {
-            E[idx][d] -= LEARNING_RATE * grad[d];
+            E[embOffset + d] -= LEARNING_RATE * grad[d];
         }
     }
 }
@@ -279,7 +298,14 @@ function startTraining() {
             const savedData = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
             // Ensure vocabulary matches
             if (JSON.stringify(savedData.vocab) === JSON.stringify(vocab)) {
-                weights = savedData.weights;
+                const w = savedData.weights;
+                weights = {
+                    E: new Float32Array(Object.values(w.E)),
+                    W1: new Float32Array(Object.values(w.W1)),
+                    b1: new Float32Array(Object.values(w.b1)),
+                    W2: new Float32Array(Object.values(w.W2)),
+                    b2: new Float32Array(Object.values(w.b2))
+                };
                 startEpoch = savedData.epoch || 0;
                 console.log(`Resuming training from epoch ${startEpoch}...`);
             } else {
@@ -353,10 +379,19 @@ function startTraining() {
 }
 
 function saveWeights(weights, vocab, epoch) {
+    // Convert Float32Array to standard Arrays for JSON serialization
+    const serializableWeights = {
+        E: Array.from(weights.E),
+        W1: Array.from(weights.W1),
+        b1: Array.from(weights.b1),
+        W2: Array.from(weights.W2),
+        b2: Array.from(weights.b2)
+    };
+
     const payload = {
         epoch,
         vocab,
-        weights
+        weights: serializableWeights
     };
     try {
         fs.writeFileSync(WEIGHTS_FILE, JSON.stringify(payload, null, 2), 'utf8');

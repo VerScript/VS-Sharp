@@ -186,5 +186,193 @@
     {
         "prompt": "how does compilation work",
         "response": "### Compilation vs Interpretation\n\nHow source code is executed differs by language:\n- **Compilation**: Code is translated entirely into machine code binary before running. (e.g. C, C++, Rust). It is very fast but requires a compilation step.\n- **Interpretation**: Code is read and executed line-by-line by an interpreter program at runtime. (e.g. Python, VerScript, PHP). It is flexible but typically slower.\n- **Hybrid (JIT)**: Code is compiled to bytecode, then compiled to machine code just-in-time. (e.g. Java, JavaScript)."
+    },
+    {
+        "prompt": "tell me about VerScript README",
+        "response": "VerScript is an upcoming high-performance language. Documentation and updates will be logged here as development progresses."
+    },
+    {
+        "prompt": "tell me about VerScript Docs README",
+        "response": "# VerScript.github.io\nThe official page for the VerScript language"
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": ""
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "VerScript GitHub Documentation GitHub Documentation Open Web IDE Compile the Future A lightweight C-based parser supporting strings, booleans, integer variables, mathematical expressions, and dynamic loops."
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "Enter Documentation Open Web IDE sample.vrs !! VerScript Language Showcase \u2014 v1.2.0 Featuring: Multiline Comments (!!...!!), Command Attributes (?color, ?newline=false) !! display \"=== 1."
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "ANSI Colorized Terminal Output ===\" ?color=\"cyan\" display \"Success: VerScript Engine Active!\" ?color=\"green\" display \"Warning: Memory optimization recommended.\" ?color=\"yellow\" display \"Error: DivisionByZero handled gracefully.\" ?color=\"red\" display \"=== 2."
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "Inline Printing with ?newline=false ===\" ?color=\"purple\" display \"Loading modules: [\" ?newline=false ?color=\"cyan\" display \"Core, Lexer, VS#-1B Engine] \" ?newline=false ?color=\"yellow\" display \"Done!\" ?color=\"green\" display \"=== 3."
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "Custom Throw with ?msg Attribute ===\" ?color=\"purple\" do display \"Triggering custom exception with ?msg attribute...\" ?color=\"yellow\" throw DivisionByZeroError ?msg=\"Division by zero in calculate_ratio()\" unless DivisionByZeroError display \"Caught Exception: \" + error ?color=\"green\" Lightweight C Core VerScript is built on a minimal C foundation."
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "It includes a custom lexer and interpreter designed for fast tokenization. Dynamic Types & Expressions Enjoy dynamic typing with support for strings, integers, and booleans."
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "Effortlessly concatenate variables and evaluate mathematical expressions directly within the language."
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "\ud83d\udd04 Loops & Iterations Supports clean indented loop structures ( loop n ) and variable iteration bounds ( iterate i from x to y ) compiled and executed on the fly."
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "\ud83d\udee1\ufe0f Exception Handling &amp; Fallbacks Supports robust try-catch mechanisms with named compiler errors via do-unless [error] , as well as condition fallbacks do-unless [bool] ."
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "\u2728 VS#-1B Neural AI Engine Powered by VS#-1B , a custom 1-Billion Parameter neural architecture designed for real-time code synthesis, automated error repair, and interactive logic explanation."
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "\ud83d\udcac Multiline Comments ( !! ... !! ) Support for block multiline comment structures ( !! ... !! ) to comment out large code blocks or documentation notes across lines."
+    },
+    {
+        "prompt": "what is on the VerScript website?",
+        "response": "\u2699\ufe0f Command Attributes &amp; Kwargs Attach optional modifiers and keyword arguments directly to commands using ?attribute (e.g. ?color=\"green\" , ?newline=false , ?default=\"val\" )."
+    },
+    {
+        "prompt": "tell me more about the VerScript website",
+        "response": "&copy; 2026 VerScript. Open Source under the MIT License."
+    },
+    {
+        "prompt": "write some verscript code like sample.vrs",
+        "response": "Here is sample.vrs:\n```verscript\n!!\n  VerScript Language Showcase \u2014 v1.2.0\n  Featuring:\n    1: Multiline Comments and Single-line Comments\n    2: Command Attributes (?color, ?newline=false, ?default, ?msg)\n    3: Stepped Iteration & Loops (iterate i from x to y step z)\n    4: Exception Handling (do ... unless) & Custom Throws\n    5: System Block Operators (SuppressErrors, CriticalErrors)\n!!\n\ndisplay \"=== 1. ANSI Color & Formatting Attributes ===\" ?color=\"cyan\"\ndisplay \"Success: VerScript Engine Online!\" ?color=\"green\"\ndisplay \"Warning: High memory utilization detected.\" ?color=\"yellow\"\ndisplay \"Error: DivisionByZero handled gracefully.\" ?color=\"red\"\n\ndisplay \"=== 2. Inline Printing with ?newline=false ===\" ?color=\"purple\"\ndisplay \"Loading modules: [\" ?newline=false ?color=\"cyan\"\ndisplay \"Core, \" ?newline=false ?color=\"yellow\"\ndisplay \"Lexer, \" ?newline=false ?color=\"yellow\"\ndisplay \"VS#-1B Neural Engine] \" ?newline=false ?color=\"cyan\"\ndisplay \"Done!\" ?color=\"green\"\n\ndisplay \"=== 3. Stepped Iteration Showcase ===\" ?color=\"cyan\"\niterate count from 1 to 10 step 2\n  display \"Iteration Step: \" + count ?color=\"cyan\"\n\ndisplay \"=== 4. Exception Handling & Custom Throws ===\" ?color=\"purple\"\ndo\n  display \"Triggering custom exception with ?msg attribute...\" ?color=\"yellow\"\n  throw DivisionByZeroError ?msg=\"Division by zero in calculate_ratio()\"\nunless DivisionByZeroError\n  display \"Caught Exception: \" + error ?color=\"green\"\n\ndisplay \"=== 5. Error Suppression Block Operator ===\" ?color=\"cyan\"\nSuppressErrors\n  display \"Running invalid operation under SuppressErrors...\" ?color=\"yellow\"\n  invalid_val : 10 / 0\n  display \"Division by zero bypassed cleanly!\" ?color=\"green\"\n\ndisplay \"=== VerScript Execution Complete ===\" ?color=\"green\"\n```"
+    },
+    {
+        "prompt": "write some verscript code like incomplete_expr.vrs",
+        "response": "Here is incomplete_expr.vrs:\n```verscript\ndisplay 5 +\n```"
+    },
+    {
+        "prompt": "write some verscript code like bool_int_all.vrs",
+        "response": "Here is bool_int_all.vrs:\n```verscript\ndisplay true + 3\ndisplay true - 1\ndisplay false * 5\ndisplay true / 1\n```"
+    },
+    {
+        "prompt": "write some verscript code like error_test.vrs",
+        "response": "Here is error_test.vrs:\n```verscript\ndisplay \"hello\" - 5\n```"
+    },
+    {
+        "prompt": "write some verscript code like str_math.vrs",
+        "response": "Here is str_math.vrs:\n```verscript\nx : \"hello \" + \"world\"\ndisplay x\n```"
+    },
+    {
+        "prompt": "write some verscript code like str_neg.vrs",
+        "response": "Here is str_neg.vrs:\n```verscript\nx : - \"hello\"\ndisplay x\n```"
+    },
+    {
+        "prompt": "write some verscript code like test.vrs",
+        "response": "Here is test.vrs:\n```verscript\ndisplay \"Hello from VerScript!\"\n```"
+    },
+    {
+        "prompt": "write some verscript code like bool_neg2.vrs",
+        "response": "Here is bool_neg2.vrs:\n```verscript\nx : true\ndisplay -x\n```"
+    },
+    {
+        "prompt": "write some verscript code like test_step.vrs",
+        "response": "Here is test_step.vrs:\n```verscript\ni : 0\nwhile i < 10 step 3\n  if i = 0 then\n    display \"iter\"\n  else if i = 3 then\n    display \"3\"\n  else if i = 6 then\n    display \"6\"\n  else if i = 9 then\n    display \"9\"\n  i : i + 1\n```"
+    },
+    {
+        "prompt": "write some verscript code like test_conditionals.vrs",
+        "response": "Here is test_conditionals.vrs:\n```verscript\n! VerScript Conditionals and Comparisons Test\n\ndisplay \"--- Test Comparisons ---\"\na : 5\nb : 10\n\nif a < b then\n  display \"a < b is true\"\nelse\n  display \"a < b is false\"\n\nif a = 5 then\n  display \"a = 5 is true\"\n\nif a x= b then\n  display \"a x= b is true (not equal)\"\n\ndisplay \"--- Test If-Else-If-Else ---\"\nval : 3\nif val = 1 then\n  display \"val is 1\"\nelse if val = 2 then\n  display \"val is 2\"\nelse if val = 3 then\n  display \"val is 3 (correct)\"\nelse\n  display \"val is something else\"\n\ndisplay \"--- Test While Loop ---\"\ncount : 1\nwhile count <= 3\n  display \"count: \" + count\n  count : count + 1\n\ndisplay \"--- Test Until Loop ---\"\ncount2 : 1\nuntil count2 > 3\n  display \"until count2: \" + count2\n  count2 : count2 + 1\n```"
+    },
+    {
+        "prompt": "write some verscript code like bool_int2.vrs",
+        "response": "Here is bool_int2.vrs:\n```verscript\ndisplay 3 + true\n```"
+    },
+    {
+        "prompt": "write some verscript code like unassigned_var.vrs",
+        "response": "Here is unassigned_var.vrs:\n```verscript\nx : 10\ndisplay x + y\n```"
+    },
+    {
+        "prompt": "write some verscript code like test_do_unless.vrs",
+        "response": "Here is test_do_unless.vrs:\n```verscript\n! VerScript Do-Unless Exception and Conditionals Test\n\ndisplay \"--- Test do-unless (Exception Handling) ---\"\ndo\n  display \"in do block (will divide by zero)\"\n  x : 10 / 0\nunless DivisionByZeroError\n  display \"caught division by zero! (correct)\"\n\ndo\n  display \"in do block (will trigger undefined variable)\"\n  display missing_var\nunless error\n  display \"caught general error! (correct)\"\n\ndisplay \"--- Test do-unless (Conditional Execution) ---\"\ncond : true\ndo\n  display \"do runs (cond is true, so this shouldn't run)\"\nunless cond\n  display \"unless runs (cond is true, correct)\"\n\ncond2 : false\ndo\n  display \"do runs (cond2 is false, correct)\"\nunless cond2\n  display \"unless runs (cond2 is false, so this shouldn't run)\"\n```"
+    },
+    {
+        "prompt": "write some verscript code like neg_test.vrs",
+        "response": "Here is neg_test.vrs:\n```verscript\nx : -10\ndisplay x\n```"
+    },
+    {
+        "prompt": "write some verscript code like bool_neg.vrs",
+        "response": "Here is bool_neg.vrs:\n```verscript\ndisplay -true\n```"
+    },
+    {
+        "prompt": "write some verscript code like math_test.vrs",
+        "response": "Here is math_test.vrs:\n```verscript\nx : 10 + 20\ny : 10 - 20\nz : 10 * 20\nw : 10 / 20\ndisplay x\ndisplay y\ndisplay z\ndisplay w\n```"
+    },
+    {
+        "prompt": "write some verscript code like str_mixed_test.vrs",
+        "response": "Here is str_mixed_test.vrs:\n```verscript\ns1 : 5 + \" hello\"\ns2 : \"hello \" + 5\ns3 : \"abc \" + 10 + \" def\"\ndisplay s1\ndisplay s2\ndisplay s3\n```"
+    },
+    {
+        "prompt": "write some verscript code like bool_int.vrs",
+        "response": "Here is bool_int.vrs:\n```verscript\ndisplay true + 3\n```"
+    },
+    {
+        "prompt": "write some verscript code like undefined_lhs.vrs",
+        "response": "Here is undefined_lhs.vrs:\n```verscript\ndisplay y\n```"
+    },
+    {
+        "prompt": "write some verscript code like str_neg3.vrs",
+        "response": "Here is str_neg3.vrs:\n```verscript\nx : \"hello\"\ndisplay -x\n```"
+    },
+    {
+        "prompt": "write some verscript code like str_concat_multi.vrs",
+        "response": "Here is str_concat_multi.vrs:\n```verscript\nx : \"a\" + \"b\" + \"c\"\ndisplay x\n```"
+    },
+    {
+        "prompt": "write some verscript code like str_neg2.vrs",
+        "response": "Here is str_neg2.vrs:\n```verscript\ndisplay -\"hello\"\n```"
+    },
+    {
+        "prompt": "write some verscript code like test_loops.vrs",
+        "response": "Here is test_loops.vrs:\n```verscript\n! VerScript Loop Tests\n\ndisplay \"--- testing loop ---\"\nloop 3\n  display \"hello\"\n\ndisplay \"--- testing iterate (with from/to) ---\"\niterate idx from 1 to 4\n  display idx\n\ndisplay \"--- testing iterate (omitting from) ---\"\ncount : 2\niterate count to 5\n  display count\n\ndisplay \"--- testing nested loops ---\"\niterate outer from 1 to 2\n  loop 2\n    display \"outer: \" + outer\n```"
+    },
+    {
+        "prompt": "write some verscript code like str_concat_test.vrs",
+        "response": "Here is str_concat_test.vrs:\n```verscript\ns1 : \"hello \"\ns2 : \"world\"\ns3 : s1 + s2\ndisplay s3\n```"
+    },
+    {
+        "prompt": "write some verscript code like test_system_operators.vrs",
+        "response": "Here is test_system_operators.vrs:\n```verscript\n! Test suite for System Operators and Throw statement\n\ndisplay \"=== TEST 1: SuppressErrors block ===\"\nSuppressErrors\n  display \"Evaluating division by zero...\"\n  val : 10 / 0\n  display \"Skipped division by zero error successfully!\"\n  \n  display \"Accessing undefined variable...\"\n  display missing_variable\n  display \"Skipped undefined variable successfully!\"\n\ndisplay \"=== TEST 2: throw statement ===\"\ndo\n  display \"Throwing DivisionByZeroError...\"\n  throw DivisionByZeroError\nunless DivisionByZeroError\n  display \"Caught user-thrown: \" + error\n\ndisplay \"=== TEST 3: throw invalid error name ===\"\ndo\n  display \"Throwing UnregisteredError...\"\n  throw UnregisteredError\nunless SyntaxError\n  display \"Caught invalid error exception: \" + error\n\ndisplay \"=== TEST 4: rethrow (throw error) ===\"\ndo\n  do\n    throw InvalidOperandError\n  unless InvalidOperandError\n    display \"Caught inner exception. Rethrowing...\"\n    throw error\nunless InvalidOperandError\n  display \"Successfully caught rethrown outer exception: \" + error\n\ndisplay \"=== TEST 5: CriticalErrors ===\"\nCriticalErrors\n  display \"Critical mode: evaluating division by zero (should be skipped)...\"\n  x : 10 / 0\n  display \"Division by zero skipped!\"\n\ndisplay \"=== TEST 6: ForceErrors ===\"\ndo\n  ForceErrors\n    display \"Force mode: throwing division by zero inside do-unless (should CRASH, bypassing unless)...\"\n    val2 : 10 / 0\nunless DivisionByZeroError\n  display \"This should NOT print!\"\n```"
+    },
+    {
+        "prompt": "write some verscript code like bool_concat.vrs",
+        "response": "Here is bool_concat.vrs:\n```verscript\nx : true + \" hello\"\ndisplay x\n```"
+    },
+    {
+        "prompt": "write some verscript code like undefined_rhs_arith.vrs",
+        "response": "Here is undefined_rhs_arith.vrs:\n```verscript\nx : 10\ny : x + z\ndisplay y\n```"
+    },
+    {
+        "prompt": "write some verscript code like test_unless_internal.vrs",
+        "response": "Here is test_unless_internal.vrs:\n```verscript\n! Test unless internal and external modifiers\n\ndisplay \"--- Test 1: unless internal [bool] ---\"\nflag : false\ndo\n  display \"statement 1 inside do\"\n  display \"statement 2 inside do (will make flag true)\"\n  flag : true\n  display \"statement 3 inside do (should NOT run)\"\nunless internal flag\n  display \"unless block runs! (correct)\"\n\ndisplay \"--- Test 2: unless external [bool] ---\"\nflag2 : false\ndo\n  display \"statement 1 inside do (external)\"\n  flag2 : true\n  display \"statement 2 inside do (external - should run since external)\"\nunless external flag2\n  display \"unless block should NOT run since flag2 was false initially\"\n\ndisplay \"--- Test 3: catch DivisionByZeroError and display error keyword ---\"\ndo\n  temp : 5 / 0\nunless DivisionByZeroError\n  display \"caught error: \" + error\n```"
+    },
+    {
+        "prompt": "write some verscript code like undefined_rhs.vrs",
+        "response": "Here is undefined_rhs.vrs:\n```verscript\nx : 5\ndisplay x + y\n```"
+    },
+    {
+        "prompt": "write some verscript code like bad_expr.vrs",
+        "response": "Here is bad_expr.vrs:\n```verscript\ndisplay +\n```"
+    },
+    {
+        "prompt": "write some verscript code like test_multiline_and_attrs.vrs",
+        "response": "Here is test_multiline_and_attrs.vrs:\n```verscript\n!!\n  VerScript Feature Test:\n  1. Multiline Comments\n  2. Command Attributes (?attr and kwargs)\n!!\n\ndisplay \"--- 1. Testing Color Attributes ---\" ?color=\"cyan\"\ndisplay \"Success: Green Output!\" ?color=\"green\"\ndisplay \"Warning: Yellow Output!\" ?color=\"yellow\"\ndisplay \"Error: Red Output!\" ?color=\"red\"\n\ndisplay \"--- 2. Testing Inline & Suppressed Newline Attributes ---\" ?color=\"purple\"\ndisplay \"Item 1, \" ?newline=false ?color=\"cyan\"\ndisplay \"Item 2, \" ?newline=false ?color=\"yellow\"\ndisplay \"Item 3 (Done!)\" ?color=\"green\"\n\ndisplay \"--- 3. Testing Custom Throw with ?msg Attribute ---\" ?color=\"blue\"\ndo\n  throw DivisionByZeroError ?msg=\"Custom DivisionByZero error triggered with attribute!\"\nunless DivisionByZeroError\n  display \"Caught: \" + error ?color=\"green\"\n```"
     }
 ]
