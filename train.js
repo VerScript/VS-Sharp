@@ -27,9 +27,9 @@ function calculateModelParameters(config = MODEL_CONFIG) {
 }
 
 // --- LLM HYPERPARAMETERS ---
-const EMBED_DIM = 128;
-const CONTEXT_WINDOW = 32;
-const HIDDEN_SIZE = 256;
+const EMBED_DIM = 2048;
+const CONTEXT_WINDOW = 128;
+const HIDDEN_SIZE = 3814;
 const LEARNING_RATE = 0.02;
 const SAVE_INTERVAL_EPOCHS = 10;
 const DATA_FILE = path.join(__dirname, 'knowledge', 'training_data.json');
@@ -39,6 +39,7 @@ const STOP_FILE = path.join(__dirname, 'stop_training.txt');
 // --- TOKENIZER ---
 function tokenize(text) {
     const tokens = [];
+    // We update regex to properly tokenize markdown elements as well
     const regex = /(\r?\n|\w+|[^\w\s])/g;
     let match;
     while ((match = regex.exec(text)) !== null) {
@@ -46,7 +47,7 @@ function tokenize(text) {
         if (t === '\r\n' || t === '\n') {
             tokens.push('\n');
         } else {
-            tokens.push(t.toLowerCase());
+            tokens.push(t); // Removed .toLowerCase() to preserve casing
         }
     }
     return tokens;

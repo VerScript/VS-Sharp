@@ -24,13 +24,14 @@ const MODEL_CONFIG = {
     quantization: "INT8/FP16"
 };
 
-const CONTEXT_WINDOW = 32;
-const EMBED_DIM = 128;
-const HIDDEN_SIZE = 256;
+const CONTEXT_WINDOW = 128;
+const EMBED_DIM = 2048;
+const HIDDEN_SIZE = 3814;
 
 // --- TOKENIZER ---
 function tokenize(text) {
     const tokens = [];
+    // We update regex to properly tokenize markdown elements as well
     const regex = /(\r?\n|\w+|[^\w\s])/g;
     let match;
     while ((match = regex.exec(text)) !== null) {
@@ -38,7 +39,7 @@ function tokenize(text) {
         if (t === '\r\n' || t === '\n') {
             tokens.push('\n');
         } else {
-            tokens.push(t.toLowerCase());
+            tokens.push(t); // Removed .toLowerCase() to preserve casing
         }
     }
     return tokens;
@@ -240,6 +241,19 @@ function generateLLMResponse(message, weightsData) {
                 continue;
             }
 
+            // Fix bold text formatting
+            if (char === '*' && responseText.substring(i, i + 3) === '* *') {
+                newResponse += '**';
+                i += 2;
+                if (i + 1 < responseText.length && responseText[i + 1] === ' ' && /[a-zA-Z0-9]/.test(responseText[i + 2])) {
+                    i++;
+                }
+                if (newResponse.endsWith(' **')) {
+                    newResponse = newResponse.slice(0, -3) + '**';
+                }
+                continue;
+            }
+
             if (char === '\x60') {
                 if (responseText.substring(i, i + 5) === '\x60 \x60 \x60') {
                     newResponse += '\x60\x60\x60';
@@ -272,6 +286,13 @@ function generateLLMResponse(message, weightsData) {
 
         newResponse += char;
     }
+
+    newResponse = newResponse.replace(/\*\* ([^*]+) \*\*/g, '**$1**');
+    newResponse = newResponse.replace(/\*\* ([^*]+)\*\*/g, '**$1**');
+    newResponse = newResponse.replace(/\*\*([^*]+) \*\*/g, '**$1**');
+    newResponse = newResponse.replace(/- \*\*/g, '- **');
+    newResponse = newResponse.replace(/([a-zA-Z]) - ([a-zA-Z])/g, '$1-$2');
+
     responseText = newResponse;
 
     return responseText;
