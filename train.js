@@ -347,11 +347,11 @@ function startTraining() {
         weights = initRandomWeights(vocab.length);
     }
 
-    console.log("\n=============================================");
+    console.log("\n===");
     console.log("   VS-Sharp Generative LLM Training Started  ");
     console.log(`   Running loop in background...             `);
     console.log(`   To stop, run PowerShell: .\\stop-training.ps1`);
-    console.log("=============================================\n");
+    console.log("===\n");
 
     let epoch = startEpoch;
     
