@@ -38,7 +38,7 @@ function tokenize(text) {
         if (t === '\r\n' || t === '\n') {
             tokens.push('\n');
         } else {
-            tokens.push(t.toLowerCase());
+            tokens.push(t);
         }
     }
     return tokens;
