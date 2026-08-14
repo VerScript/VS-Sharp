@@ -59,8 +59,13 @@ function initRandomWeights(vocabSize) {
     const E = new Float32Array(vocabSize * EMBED_DIM);
     for (let i = 0; i < E.length; i++) E[i] = (Math.random() - 0.5) * scale;
 
-    const W1 = new Float32Array((CONTEXT_WINDOW * EMBED_DIM) * HIDDEN_SIZE);
-    for (let i = 0; i < W1.length; i++) W1[i] = (Math.random() - 0.5) * scale;
+    const W1 = new Array(CONTEXT_WINDOW);
+    for (let c = 0; c < CONTEXT_WINDOW; c++) {
+        W1[c] = new Float32Array(EMBED_DIM * HIDDEN_SIZE);
+        for (let i = 0; i < W1[c].length; i++) {
+            W1[c][i] = (Math.random() - 0.5) * scale;
+        }
+    }
 
     const b1 = new Float32Array(HIDDEN_SIZE);
 
@@ -94,9 +99,11 @@ function forward(contextIdxs, weights) {
     const h = new Float32Array(H);
     for (let j = 0; j < H; j++) {
         let sum = b1[j];
-        for (let i = 0; i < C * D; i++) {
-            // W1 dimension: (C*D) x H
-            sum += x[i] * W1[i * H + j];
+        for (let c = 0; c < C; c++) {
+            for (let d = 0; d < D; d++) {
+                const i = c * D + d;
+                sum += x[i] * W1[c][d * H + j];
+            }
         }
         h[j] = Math.tanh(sum);
     }
@@ -175,21 +182,28 @@ function backward(contextIdxs, targetIdx, weights, forwardResult) {
     const db1 = dHiddenRaw;
 
     // dW1 = x^T * dHiddenRaw
-    const dW1 = new Float32Array((C * D) * H);
-    for (let i = 0; i < C * D; i++) {
-        for (let j = 0; j < H; j++) {
-            dW1[i * H + j] = x[i] * dHiddenRaw[j];
+    const dW1 = new Array(C);
+    for (let c = 0; c < C; c++) {
+        dW1[c] = new Float32Array(D * H);
+        for (let d = 0; d < D; d++) {
+            const i = c * D + d;
+            for (let j = 0; j < H; j++) {
+                dW1[c][d * H + j] = x[i] * dHiddenRaw[j];
+            }
         }
     }
 
     // dx = dHiddenRaw * W1^T
     const dx = new Float32Array(C * D);
-    for (let i = 0; i < C * D; i++) {
-        let sum = 0;
-        for (let j = 0; j < H; j++) {
-            sum += dHiddenRaw[j] * W1[i * H + j];
+    for (let c = 0; c < C; c++) {
+        for (let d = 0; d < D; d++) {
+            const i = c * D + d;
+            let sum = 0;
+            for (let j = 0; j < H; j++) {
+                sum += dHiddenRaw[j] * W1[c][d * H + j];
+            }
+            dx[i] = sum;
         }
-        dx[i] = sum;
     }
 
     // Map dx back to embedding updates (dE)
@@ -227,9 +241,10 @@ function updateWeights(weights, gradients) {
         b2[k] -= LEARNING_RATE * db2[k];
     }
     // W1 update
-    for (let i = 0; i < CD; i++) {
-        for (let j = 0; j < H; j++) {
-            W1[i * H + j] -= LEARNING_RATE * dW1[i * H + j];
+    for (let c = 0; c < dW1.length; c++) {
+        const len = W1[c].length;
+        for (let i = 0; i < len; i++) {
+            W1[c][i] -= LEARNING_RATE * dW1[c][i];
         }
     }
     // b1 update
@@ -324,9 +339,22 @@ function startTraining() {
             // Ensure vocabulary matches
             if (JSON.stringify(savedData.vocab) === JSON.stringify(vocab)) {
                 const w = savedData.weights;
+
+                let parsedW1;
+                if (Array.isArray(w.W1) && Array.isArray(w.W1[0])) {
+                    parsedW1 = w.W1.map(arr => new Float32Array(arr));
+                } else {
+                    const flatW1 = Object.values(w.W1);
+                    const chunkSize = EMBED_DIM * HIDDEN_SIZE;
+                    parsedW1 = new Array(CONTEXT_WINDOW);
+                    for (let c = 0; c < CONTEXT_WINDOW; c++) {
+                        parsedW1[c] = new Float32Array(flatW1.slice(c * chunkSize, (c + 1) * chunkSize));
+                    }
+                }
+
                 weights = {
                     E: new Float32Array(Object.values(w.E)),
-                    W1: new Float32Array(Object.values(w.W1)),
+                    W1: parsedW1,
                     b1: new Float32Array(Object.values(w.b1)),
                     W2: new Float32Array(Object.values(w.W2)),
                     b2: new Float32Array(Object.values(w.b2))
@@ -407,7 +435,7 @@ function saveWeights(weights, vocab, epoch) {
     // Convert Float32Array to standard Arrays for JSON serialization
     const serializableWeights = {
         E: Array.from(weights.E),
-        W1: Array.from(weights.W1),
+        W1: weights.W1.map(arr => Array.from(arr)),
         b1: Array.from(weights.b1),
         W2: Array.from(weights.W2),
         b2: Array.from(weights.b2)

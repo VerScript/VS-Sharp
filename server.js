@@ -68,8 +68,11 @@ function forward(contextIdxs, weights) {
     const h = new Float32Array(H);
     for (let j = 0; j < H; j++) {
         let sum = b1[j];
-        for (let i = 0; i < C * D; i++) {
-            sum += x[i] * W1[i * H + j];
+        for (let c = 0; c < C; c++) {
+            for (let d = 0; d < D; d++) {
+                const i = c * D + d;
+                sum += x[i] * W1[c][d * H + j];
+            }
         }
         h[j] = Math.tanh(sum);
     }
@@ -533,11 +536,24 @@ function mountRoutes(app, basePath) {
         try {
             const weightsDataRaw = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
             const w = weightsDataRaw.weights;
+
+            let parsedW1;
+            if (Array.isArray(w.W1) && Array.isArray(w.W1[0])) {
+                parsedW1 = w.W1.map(arr => new Float32Array(arr));
+            } else {
+                const flatW1 = Object.values(w.W1);
+                const chunkSize = EMBED_DIM * HIDDEN_SIZE;
+                parsedW1 = new Array(CONTEXT_WINDOW);
+                for (let c = 0; c < CONTEXT_WINDOW; c++) {
+                    parsedW1[c] = new Float32Array(flatW1.slice(c * chunkSize, (c + 1) * chunkSize));
+                }
+            }
+
             const weightsData = {
                 vocab: weightsDataRaw.vocab,
                 weights: {
                     E: new Float32Array(Object.values(w.E)),
-                    W1: new Float32Array(Object.values(w.W1)),
+                    W1: parsedW1,
                     b1: new Float32Array(Object.values(w.b1)),
                     W2: new Float32Array(Object.values(w.W2)),
                     b2: new Float32Array(Object.values(w.b2))
