@@ -27,9 +27,9 @@ function calculateModelParameters(config = MODEL_CONFIG) {
 }
 
 // --- LLM HYPERPARAMETERS ---
-const EMBED_DIM = 128;
-const CONTEXT_WINDOW = 32;
-const HIDDEN_SIZE = 256;
+const EMBED_DIM = 2048;
+const CONTEXT_WINDOW = 112;
+const HIDDEN_SIZE = 4096;
 const LEARNING_RATE = 0.02;
 const SAVE_INTERVAL_EPOCHS = 10;
 const DATA_FILE = path.join(__dirname, 'knowledge', 'training_data.json');

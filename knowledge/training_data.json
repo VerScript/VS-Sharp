@@ -186,5 +186,61 @@
     {
         "prompt": "how does compilation work",
         "response": "### Compilation vs Interpretation\n\nHow source code is executed differs by language:\n- **Compilation**: Code is translated entirely into machine code binary before running. (e.g. C, C++, Rust). It is very fast but requires a compilation step.\n- **Interpretation**: Code is read and executed line-by-line by an interpreter program at runtime. (e.g. Python, VerScript, PHP). It is flexible but typically slower.\n- **Hybrid (JIT)**: Code is compiled to bytecode, then compiled to machine code just-in-time. (e.g. Java, JavaScript)."
+    },
+    {
+        "prompt": "Write a simple loop in VerScript",
+        "response": "### VerScript Loop Example\n\n```verscript\ni : 0\nloop i < 5 step 1\n    display i\n```"
+    },
+    {
+        "prompt": "How to declare variables?",
+        "response": "### VerScript Variables\n\nVariables are declared using a colon `:`. For example:\n```verscript\nmy_var : 42\nname : \"John\"\n```"
+    },
+    {
+        "prompt": "Write a fibonacci function in Python",
+        "response": "### Python Fibonacci\n\n```python\ndef fib(n):\n    if n <= 1:\n        return n\n    return fib(n-1) + fib(n-2)\n```"
+    },
+    {
+        "prompt": "How do I print something?",
+        "response": "### VerScript Display\n\nYou can print to the terminal using the `display` command:\n```verscript\ndisplay \"Hello World\"\n```"
+    },
+    {
+        "prompt": "Give me an example of an if statement",
+        "response": "### VerScript If Statement\n\n```verscript\nx : 10\nif x == 10\n    display \"x is 10\"\n```"
+    },
+    {
+        "prompt": "Write a simple program in C++",
+        "response": "### C++ Example\n\n```cpp\n#include <iostream>\n\nint main() {\n    std::cout << \"Hello World!\" << std::endl;\n    return 0;\n}\n```"
+    },
+    {
+        "prompt": "What is VerScript?",
+        "response": "VerScript is an upcoming high-performance language with massive freedom of code."
+    },
+    {
+        "prompt": "Give me an example of an if statement in VerScript",
+        "response": "### VerScript If Statement\n\nIn VerScript, conditional logic uses the `if` keyword. Here is an example:\n\n```verscript\nx : 10\nif x == 10\n    display \"x is 10\"\n```"
+    },
+    {
+        "prompt": "Can you show me how to read user input in VerScript?",
+        "response": "### VerScript User Input\n\nYou can use the `prompt` command to ask the user for input and store it in a variable:\n\n```verscript\nname : prompt \"Enter your name: \"\ndisplay \"Hello \" + name\n```"
+    },
+    {
+        "prompt": "Write a JavaScript function to add two numbers",
+        "response": "### JavaScript Addition\n\nHere is a simple function to add two numbers in JavaScript:\n\n```javascript\nfunction add(a, b) {\n    return a + b;\n}\nconsole.log(add(5, 3));\n```"
+    },
+    {
+        "prompt": "How do I do math in VerScript?",
+        "response": "### VerScript Math Operations\n\nVerScript supports basic arithmetic operators. Here are some examples:\n\n```verscript\nsum : 5 + 3\ndiff : 10 - 2\nprod : 4 * 2\nquot : 16 / 2\n```"
+    },
+    {
+        "prompt": "Explain the IDE architecture or provide a prompt for it",
+        "response": "### VerScript IDE Architecture\n\nThe Web IDE for VerScript allows users to write and test VerScript directly in the browser. It communicates with backend execution servers (like VS-Sharp and PolyServer).\n\nIf you need a prompt for the IDE section: \"Create a modern, dark-themed Web IDE interface for VerScript with syntax highlighting, an output console, and a connection to the PolyServer runner API.\"\n\nCode snippet context:\n```javascript\n### VerScript Web IDE\nThe Web IDE for VerScript...\n```"
+    },
+    {
+        "prompt": "What does the VerScript C architecture look like?",
+        "response": "### VerScript Core Architecture\n\nThe core of VerScript is written in C. It includes parsers, tokenizers, and interpreters for language statements like display, prompt, loop, and if. Here is a brief look at the C source:\n\n```c\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <ctype.h>\n#include <stdarg.h>\n#include <setjmp.h>\n#include \"../include/opcodes.h\"\n#include \"../include/lexer.h\"\n\ntypedef enum { VAR_INT, VAR_STRING, VAR_BOOL } VarType;\n\ntypedef struct {\n    char *name;\n    VarType type;\n    int int_val;\n    char *string_val;\n} Variable;\n\nVariable *symtable = NULL;\nint var_count = 0;\nint var_capacity = 0;\n\n#define MAX_JMP_STACK 64\njmp_buf jmp_env_stack[MAX_JMP_STACK];\nint jmp_stack_ptr = 0;\n\n#de...\n```"
+    },
+    {
+        "prompt": "Write a Python script to sort a list",
+        "response": "### Python Sorting\n\nHere is how you can sort a list in Python:\n\n```python\nmy_list = [3, 1, 4, 1, 5, 9]\nmy_list.sort()\nprint(my_list)\n```"
     }
 ]
