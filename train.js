@@ -340,11 +340,13 @@ function startTraining() {
             if (JSON.stringify(savedData.vocab) === JSON.stringify(vocab)) {
                 const w = savedData.weights;
 
+                const getArray = (val) => Array.isArray(val) ? val : Object.values(val);
+
                 let parsedW1;
                 if (Array.isArray(w.W1) && Array.isArray(w.W1[0])) {
                     parsedW1 = w.W1.map(arr => new Float32Array(arr));
                 } else {
-                    const flatW1 = Object.values(w.W1);
+                    const flatW1 = getArray(w.W1);
                     const chunkSize = EMBED_DIM * HIDDEN_SIZE;
                     parsedW1 = new Array(CONTEXT_WINDOW);
                     for (let c = 0; c < CONTEXT_WINDOW; c++) {
@@ -353,11 +355,11 @@ function startTraining() {
                 }
 
                 weights = {
-                    E: new Float32Array(Object.values(w.E)),
+                    E: new Float32Array(getArray(w.E)),
                     W1: parsedW1,
-                    b1: new Float32Array(Object.values(w.b1)),
-                    W2: new Float32Array(Object.values(w.W2)),
-                    b2: new Float32Array(Object.values(w.b2))
+                    b1: new Float32Array(getArray(w.b1)),
+                    W2: new Float32Array(getArray(w.W2)),
+                    b2: new Float32Array(getArray(w.b2))
                 };
                 startEpoch = savedData.epoch || 0;
                 console.log(`Resuming training from epoch ${startEpoch}...`);

@@ -150,7 +150,10 @@ function generateLLMResponse(message, weightsData) {
         // Softmax sampling with temperature
         const temp = 0.7;
         const logProbs = probs.map(p => Math.log(p + 1e-10) / temp);
-        const maxLog = Math.max(...logProbs);
+        let maxLog = -Infinity;
+        for (let i = 0; i < logProbs.length; i++) {
+            if (logProbs[i] > maxLog) maxLog = logProbs[i];
+        }
         const tempExps = logProbs.map(lp => Math.exp(lp - maxLog));
         const tempSum = tempExps.reduce((a, b) => a + b, 0);
         const tempProbs = tempExps.map(te => te / (tempSum || 1e-10));
@@ -537,11 +540,13 @@ function mountRoutes(app, basePath) {
             const weightsDataRaw = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
             const w = weightsDataRaw.weights;
 
+            const getArray = (val) => Array.isArray(val) ? val : Object.values(val);
+
             let parsedW1;
             if (Array.isArray(w.W1) && Array.isArray(w.W1[0])) {
                 parsedW1 = w.W1.map(arr => new Float32Array(arr));
             } else {
-                const flatW1 = Object.values(w.W1);
+                const flatW1 = getArray(w.W1);
                 const chunkSize = EMBED_DIM * HIDDEN_SIZE;
                 parsedW1 = new Array(CONTEXT_WINDOW);
                 for (let c = 0; c < CONTEXT_WINDOW; c++) {
@@ -552,11 +557,11 @@ function mountRoutes(app, basePath) {
             const weightsData = {
                 vocab: weightsDataRaw.vocab,
                 weights: {
-                    E: new Float32Array(Object.values(w.E)),
+                    E: new Float32Array(getArray(w.E)),
                     W1: parsedW1,
-                    b1: new Float32Array(Object.values(w.b1)),
-                    W2: new Float32Array(Object.values(w.W2)),
-                    b2: new Float32Array(Object.values(w.b2))
+                    b1: new Float32Array(getArray(w.b1)),
+                    W2: new Float32Array(getArray(w.W2)),
+                    b2: new Float32Array(getArray(w.b2))
                 }
             };
 
