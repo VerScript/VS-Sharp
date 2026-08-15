@@ -24,9 +24,9 @@ const MODEL_CONFIG = {
     quantization: "INT8/FP16"
 };
 
-const CONTEXT_WINDOW = 32;
-const EMBED_DIM = 128;
-const HIDDEN_SIZE = 256;
+const CONTEXT_WINDOW = 112;
+const EMBED_DIM = 2048;
+const HIDDEN_SIZE = 4096;
 
 // --- TOKENIZER ---
 function tokenize(text) {
@@ -148,7 +148,7 @@ function generateLLMResponse(message, weightsData) {
         const probs = forward(context, weights);
 
         // Softmax sampling with temperature
-        const temp = 0.7;
+        const temp = 0.9;
         const logProbs = probs.map(p => Math.log(p + 1e-10) / temp);
         let maxLog = -Infinity;
         for (let i = 0; i < logProbs.length; i++) {
