@@ -123,11 +123,11 @@ function generateLLMResponse(message, weightsData) {
 
     // Tokenize prompt
     const promptTokens = tokenize(message);
-    const sequenceIdxs = [
-        startIdx,
-        ...promptTokens.map(getIdx),
-        sepIdx
-    ];
+    const sequenceIdxs = [startIdx];
+    for (let t of promptTokens) {
+        sequenceIdxs.push(getIdx(t));
+    }
+    sequenceIdxs.push(sepIdx);
 
     const generatedTokens = [];
     const maxGenLength = 200;

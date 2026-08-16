@@ -280,7 +280,8 @@ function startTraining() {
         const pTokens = tokenize(pair.prompt);
         const rTokens = tokenize(pair.response);
         
-        corpusTokens.push(...pTokens, ...rTokens);
+        for (let t of pTokens) { corpusTokens.push(t); }
+        for (let t of rTokens) { corpusTokens.push(t); }
         trainingPairs.push({ pTokens, rTokens });
     });
 
@@ -303,13 +304,11 @@ function startTraining() {
 
     const dataset = [];
     trainingPairs.forEach(pair => {
-        const sequence = [
-            startIdx,
-            ...pair.pTokens.map(getIdx),
-            sepIdx,
-            ...pair.rTokens.map(getIdx),
-            endIdx
-        ];
+        const sequence = [startIdx];
+        for (let t of pair.pTokens) { sequence.push(getIdx(t)); }
+        sequence.push(sepIdx);
+        for (let t of pair.rTokens) { sequence.push(getIdx(t)); }
+        sequence.push(endIdx);
 
         for (let i = 0; i < sequence.length; i++) {
             // context consists of previous CONTEXT_WINDOW tokens
