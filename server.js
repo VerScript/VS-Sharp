@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const os = require('os');
+const tf = require('@tensorflow/tfjs-node');
 
 const WEIGHTS_FILE = path.join(__dirname, 'model_weights.json');
 
@@ -44,71 +45,41 @@ function tokenize(text) {
     return tokens;
 }
 
-// --- NEURAL NETWORK FORWARD PASS ---
-function forward(contextIdxs, weights) {
-    const { E, W1, b1, W2, b2 } = weights;
-    const C = contextIdxs.length;
-    const D = EMBED_DIM;
-    const H = HIDDEN_SIZE;
-    const V = b2.length;
-    const vocabSize = E.length / D;
 
-    // 1. Concatenate Embeddings
-    const x = new Float32Array(C * D);
-    for (let c = 0; c < C; c++) {
-        const idx = contextIdxs[c];
-        const safeIdx = (idx >= 0 && idx < vocabSize) ? idx : 0;
-        const embOffset = safeIdx * D;
-        for (let d = 0; d < D; d++) {
-            x[c * D + d] = E[embOffset + d];
-        }
-    }
+// --- TENSORFLOW FORWARD PASS ---
+function forwardTF(contextIdxs, tfWeights) {
+    return tf.tidy(() => {
+        const { E, W1, b1, W2, b2 } = tfWeights;
+        const C = contextIdxs.length;
 
-    // 2. Hidden Layer: h = tanh(x * W1 + b1)
-    const h = new Float32Array(H);
-    for (let j = 0; j < H; j++) {
-        let sum = b1[j];
-        for (let c = 0; c < C; c++) {
-            for (let d = 0; d < D; d++) {
-                const i = c * D + d;
-                sum += x[i] * W1[c][d * H + j];
-            }
-        }
-        h[j] = Math.tanh(sum);
-    }
+        // 1. Get Embeddings
+        // E is [vocabSize, embedDim]
+        const indices = tf.tensor1d(contextIdxs, 'int32');
+        const x = tf.gather(E, indices); // Shape: [C, embedDim]
 
-    // 3. Output Logits: logits = h * W2 + b2
-    const logits = new Float32Array(V);
-    for (let k = 0; k < V; k++) {
-        let sum = b2[k];
-        for (let j = 0; j < H; j++) {
-            sum += h[j] * W2[j * V + k];
-        }
-        logits[k] = sum;
-    }
+        // 2. Hidden Layer: h = tanh(flatten(x) * W1_flat + b1)
+        // Since W1 was originally stored per context position: [C, embedDim * hiddenSize]
+        // Flatten x: [C * embedDim]
+        // Actually, original code does:
+        // for c in C, d in D: sum += x[c*D+d] * W1[c][d*H+j]
+        // So W1_flat can be seen as [C * embedDim, hiddenSize]
+        // Let's reshape x to [1, C * embedDim] and W1 to [C * embedDim, hiddenSize]
+        const xFlat = x.reshape([1, -1]);
+        const h = tf.tanh(tf.add(tf.matMul(xFlat, W1), b1)); // Shape: [1, hiddenSize]
 
-    // 4. Softmax
-    let max = -Infinity;
-    for (let k = 0; k < V; k++) {
-        if (logits[k] > max) max = logits[k];
-    }
-    const exps = new Float32Array(V);
-    let sumExps = 0;
-    for (let k = 0; k < V; k++) {
-        exps[k] = Math.exp(logits[k] - max);
-        sumExps += exps[k];
-    }
+        // 3. Output Logits: logits = h * W2 + b2
+        // h is [1, hiddenSize], W2 is [hiddenSize, vocabSize]
+        const logits = tf.add(tf.matMul(h, W2), b2); // Shape: [1, vocabSize]
 
-    // PolyServer needs standard array here
-    const probs = new Array(V);
-    for (let k = 0; k < V; k++) {
-        probs[k] = exps[k] / (sumExps || 1e-10);
-    }
+        // 4. Softmax
+        const probs = tf.softmax(logits).squeeze();
 
-    return probs;
+        return probs.arraySync();
+    });
 }
 
-// --- GENERATE RESPONSE FROM LLM ---
+
+// --- GENERATE RESPONSE FROM LLM (TENSORFLOW) ---
 function generateLLMResponse(message, weightsData) {
     const { vocab, weights } = weightsData;
     const vocabMap = new Map(vocab.map((t, idx) => [t, idx]));
@@ -121,7 +92,6 @@ function generateLLMResponse(message, weightsData) {
 
     const getIdx = t => vocabMap.has(t) ? vocabMap.get(t) : unkIdx;
 
-    // Tokenize prompt
     const promptTokens = tokenize(message);
     const sequenceIdxs = [
         startIdx,
@@ -132,8 +102,27 @@ function generateLLMResponse(message, weightsData) {
     const generatedTokens = [];
     const maxGenLength = 200;
 
+    // Convert weights to tensors
+    const tfWeights = tf.tidy(() => {
+        // E: [vocabSize, embedDim]
+        const E = tf.tensor2d(weights.E, [vocab.length, EMBED_DIM]);
+
+        // W1: Originally Array of Float32Array length C. Each Float32Array is EMBED_DIM * HIDDEN_SIZE.
+        // We want a single tensor [CONTEXT_WINDOW * EMBED_DIM, HIDDEN_SIZE]
+        const flatW1 = new Float32Array(CONTEXT_WINDOW * EMBED_DIM * HIDDEN_SIZE);
+        for(let c=0; c<CONTEXT_WINDOW; c++) {
+            flatW1.set(weights.W1[c], c * EMBED_DIM * HIDDEN_SIZE);
+        }
+        const W1 = tf.tensor2d(flatW1, [CONTEXT_WINDOW * EMBED_DIM, HIDDEN_SIZE]);
+
+        const b1 = tf.tensor1d(weights.b1);
+        const W2 = tf.tensor2d(weights.W2, [HIDDEN_SIZE, vocab.length]);
+        const b2 = tf.tensor1d(weights.b2);
+
+        return { E, W1, b1, W2, b2 };
+    });
+
     for (let step = 0; step < maxGenLength; step++) {
-        // Prepare context
         const context = [];
         for (let c = CONTEXT_WINDOW; c >= 1; c--) {
             const seqIdx = sequenceIdxs.length - c;
@@ -144,10 +133,8 @@ function generateLLMResponse(message, weightsData) {
             }
         }
 
-        // Forward pass to get probs
-        const probs = forward(context, weights);
+        const probs = forwardTF(context, tfWeights);
 
-        // Softmax sampling with temperature
         const temp = 0.9;
         const logProbs = probs.map(p => Math.log(p + 1e-10) / temp);
         let maxLog = -Infinity;
@@ -158,7 +145,6 @@ function generateLLMResponse(message, weightsData) {
         const tempSum = tempExps.reduce((a, b) => a + b, 0);
         const tempProbs = tempExps.map(te => te / (tempSum || 1e-10));
 
-        // Sample token
         const r = Math.random();
         let cumulative = 0;
         let nextIdx = endIdx;
@@ -175,6 +161,9 @@ function generateLLMResponse(message, weightsData) {
         sequenceIdxs.push(nextIdx);
         generatedTokens.push(vocab[nextIdx]);
     }
+
+    // Dispose tf weights
+    tf.dispose(tfWeights);
 
     // Decode generated tokens
     let responseText = "";

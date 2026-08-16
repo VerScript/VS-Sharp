@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const tf = require('@tensorflow/tfjs-node');
 
 // --- VS#-1B MODEL ARCHITECTURE CONFIGURATION (1 BILLION PARAMETERS) ---
 const MODEL_CONFIG = {
@@ -52,218 +53,143 @@ function tokenize(text) {
     return tokens;
 }
 
-// --- INITIALIZE WEIGHTS ---
-function initRandomWeights(vocabSize) {
-    const scale = 0.1;
 
-    const E = new Float32Array(vocabSize * EMBED_DIM);
-    for (let i = 0; i < E.length; i++) E[i] = (Math.random() - 0.5) * scale;
+// --- TENSORFLOW MODEL SETUP ---
+function buildModel(vocabSize) {
+    const model = tf.sequential();
+    // Embedding layer: [batch_size, CONTEXT_WINDOW] -> [batch_size, CONTEXT_WINDOW, EMBED_DIM]
+    model.add(tf.layers.embedding({
+        inputDim: vocabSize,
+        outputDim: EMBED_DIM,
+        inputLength: CONTEXT_WINDOW
+    }));
 
-    const W1 = new Array(CONTEXT_WINDOW);
+    // Flatten to [batch_size, CONTEXT_WINDOW * EMBED_DIM]
+    model.add(tf.layers.flatten());
+
+    // Dense Hidden Layer (tanh)
+    model.add(tf.layers.dense({
+        units: HIDDEN_SIZE,
+        activation: 'tanh',
+        useBias: true
+    }));
+
+    // Output Logits Layer
+    model.add(tf.layers.dense({
+        units: vocabSize,
+        useBias: true
+    }));
+
+    model.compile({
+        optimizer: tf.train.sgd(LEARNING_RATE),
+        loss: 'sparseCategoricalCrossentropy'
+    });
+
+    return model;
+}
+
+// Helper to manually extract weights for saving in the format expected by server.js
+async function extractWeights(model) {
+    const E = await model.layers[0].getWeights()[0].data();
+    const W1 = await model.layers[2].getWeights()[0].data();
+    const b1 = await model.layers[2].getWeights()[1].data();
+    const W2 = await model.layers[3].getWeights()[0].data();
+    const b2 = await model.layers[3].getWeights()[1].data();
+
+    const chunkSize = EMBED_DIM * HIDDEN_SIZE;
+    const parsedW1 = new Array(CONTEXT_WINDOW);
     for (let c = 0; c < CONTEXT_WINDOW; c++) {
-        W1[c] = new Float32Array(EMBED_DIM * HIDDEN_SIZE);
-        for (let i = 0; i < W1[c].length; i++) {
-            W1[c][i] = (Math.random() - 0.5) * scale;
-        }
+        parsedW1[c] = W1.subarray(c * chunkSize, (c + 1) * chunkSize);
     }
 
-    const b1 = new Float32Array(HIDDEN_SIZE);
-
-    const W2 = new Float32Array(HIDDEN_SIZE * vocabSize);
-    for (let i = 0; i < W2.length; i++) W2[i] = (Math.random() - 0.5) * scale;
-
-    const b2 = new Float32Array(vocabSize);
-
-    return { E, W1, b1, W2, b2 };
+    return {
+        E: E,
+        W1: parsedW1,
+        b1: b1,
+        W2: W2,
+        b2: b2
+    };
 }
 
-// --- FORWARD PASS ---
-function forward(contextIdxs, weights) {
-    const { E, W1, b1, W2, b2 } = weights;
-    const C = contextIdxs.length;
-    const D = EMBED_DIM;
-    const H = HIDDEN_SIZE;
-    const V = b2.length;
 
-    // 1. Concatenate Embeddings
-    const x = new Float32Array(C * D);
-    for (let c = 0; c < C; c++) {
-        const idx = contextIdxs[c];
-        const embOffset = idx * D;
-        for (let d = 0; d < D; d++) {
-            x[c * D + d] = E[embOffset + d];
-        }
-    }
 
-    // 2. Hidden Layer: h = tanh(x * W1 + b1)
-    const h = new Float32Array(H);
-    for (let j = 0; j < H; j++) {
-        let sum = b1[j];
-        for (let c = 0; c < C; c++) {
-            for (let d = 0; d < D; d++) {
-                const i = c * D + d;
-                sum += x[i] * W1[c][d * H + j];
-            }
-        }
-        h[j] = Math.tanh(sum);
-    }
+const https = require('https');
 
-    // 3. Output Logits: logits = h * W2 + b2
-    const logits = new Float32Array(V);
-    for (let k = 0; k < V; k++) {
-        let sum = b2[k];
-        for (let j = 0; j < H; j++) {
-            // W2 dimension: H x V
-            sum += h[j] * W2[j * V + k];
-        }
-        logits[k] = sum;
-    }
-
-    // 4. Softmax
-    let max = -Infinity;
-    for (let k = 0; k < V; k++) {
-        if (logits[k] > max) max = logits[k];
-    }
-    const exps = new Float32Array(V);
-    let sumExps = 0;
-    for (let k = 0; k < V; k++) {
-        exps[k] = Math.exp(logits[k] - max);
-        sumExps += exps[k];
-    }
-    const probs = new Float32Array(V);
-    for (let k = 0; k < V; k++) {
-        probs[k] = exps[k] / (sumExps || 1e-10);
-    }
-
-    return { x, h, probs };
+function fetchUrl(url) {
+    return new Promise((resolve, reject) => {
+        https.get(url, { headers: { 'User-Agent': 'Node.js' } }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => resolve(data));
+        }).on('error', reject);
+    });
 }
 
-// --- BACKWARD PASS ---
-function backward(contextIdxs, targetIdx, weights, forwardResult) {
-    const { E, W1, b1, W2, b2 } = weights;
-    const { x, h, probs } = forwardResult;
-    const C = contextIdxs.length;
-    const D = EMBED_DIM;
-    const H = HIDDEN_SIZE;
-    const V = b2.length;
-
-    // Output gradients
-    const dLogits = new Float32Array(probs);
-    dLogits[targetIdx] -= 1; // gradient of cross entropy loss w.r.t logits
-
-    // Output bias gradient
-    const db2 = dLogits;
-
-    // Output weights gradient: dW2 = h^T * dLogits
-    const dW2 = new Float32Array(H * V);
-    for (let j = 0; j < H; j++) {
-        for (let k = 0; k < V; k++) {
-            dW2[j * V + k] = h[j] * dLogits[k];
-        }
+async function augmentTrainingData() {
+    let rawData = [];
+    if (fs.existsSync(DATA_FILE)) {
+        rawData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
     }
 
-    // dh = dLogits * W2^T
-    const dh = new Float32Array(H);
-    for (let j = 0; j < H; j++) {
-        let sum = 0;
-        for (let k = 0; k < V; k++) {
-            sum += dLogits[k] * W2[j * V + k];
-        }
-        dh[j] = sum;
-    }
+    try {
+        console.log("Fetching data from VerScript repos...");
 
-    // d_hidden_raw = dh * (1 - h^2)
-    const dHiddenRaw = new Float32Array(H);
-    for (let j = 0; j < H; j++) {
-        dHiddenRaw[j] = dh[j] * (1 - h[j] * h[j]);
-    }
+        const existingPrompts = new Set(rawData.map(d => d.prompt));
 
-    // db1 = dHiddenRaw
-    const db1 = dHiddenRaw;
-
-    // dW1 = x^T * dHiddenRaw
-    const dW1 = new Array(C);
-    for (let c = 0; c < C; c++) {
-        dW1[c] = new Float32Array(D * H);
-        for (let d = 0; d < D; d++) {
-            const i = c * D + d;
-            for (let j = 0; j < H; j++) {
-                dW1[c][d * H + j] = x[i] * dHiddenRaw[j];
+        const codeSample = await fetchUrl('https://raw.githubusercontent.com/VerScript/VerScript/main/README.md');
+        if (codeSample && codeSample.length > 0 && !codeSample.includes('404: Not Found')) {
+            const codePrompt = "What is VerScript based on its README?";
+            if (!existingPrompts.has(codePrompt)) {
+                rawData.push({
+                    prompt: codePrompt,
+                    response: "### VerScript README\n\n" + codeSample.substring(0, 500)
+                });
             }
         }
-    }
 
-    // dx = dHiddenRaw * W1^T
-    const dx = new Float32Array(C * D);
-    for (let c = 0; c < C; c++) {
-        for (let d = 0; d < D; d++) {
-            const i = c * D + d;
-            let sum = 0;
-            for (let j = 0; j < H; j++) {
-                sum += dHiddenRaw[j] * W1[c][d * H + j];
+        const docsSample = await fetchUrl('https://raw.githubusercontent.com/VerScript/VerScript.github.io/main/index.html');
+        if (docsSample && docsSample.length > 0 && !docsSample.includes('404: Not Found')) {
+            const docsPrompt = "Show me the main docs page for VerScript";
+            if (!existingPrompts.has(docsPrompt)) {
+                rawData.push({
+                    prompt: docsPrompt,
+                    response: "### VerScript Documentation\n\n" + docsSample.substring(0, 500)
+                });
             }
-            dx[i] = sum;
         }
-    }
 
-    // Map dx back to embedding updates (dE)
-    const contextGrads = {};
-    for (let c = 0; c < C; c++) {
-        const idx = contextIdxs[c];
-        if (!contextGrads[idx]) {
-            contextGrads[idx] = new Float32Array(D);
-        }
-        for (let d = 0; d < D; d++) {
-            contextGrads[idx][d] += dx[c * D + d];
-        }
-    }
+        const otherLangs = [
+            {
+                prompt: "Write a python script to calculate factorial",
+                response: "```python\ndef factorial(n):\n    if n == 0:\n        return 1\n    return n * factorial(n-1)\n```"
+            },
+            {
+                prompt: "Write a JS function for binary search",
+                response: "```javascript\nfunction binarySearch(arr, target) {\n    let left = 0, right = arr.length - 1;\n    while (left <= right) {\n        let mid = Math.floor((left + right) / 2);\n        if (arr[mid] === target) return mid;\n        else if (arr[mid] < target) left = mid + 1;\n        else right = mid - 1;\n    }\n    return -1;\n}\n```"
+            },
+            {
+                prompt: "Create a simple C++ program to print Hello World",
+                response: "```cpp\n#include <iostream>\n\nint main() {\n    std::cout << \"Hello, World!\" << std::endl;\n    return 0;\n}\n```"
+            }
+        ];
 
-    return { dW1, db1, dW2, db2, contextGrads };
-}
-
-// --- UPDATE PARAMETERS ---
-function updateWeights(weights, gradients) {
-    const { E, W1, b1, W2, b2 } = weights;
-    const { dW1, db1, dW2, db2, contextGrads } = gradients;
-
-    const H = HIDDEN_SIZE;
-    const V = b2.length;
-    const CD = W1.length / H;
-
-    // W2 update
-    for (let j = 0; j < H; j++) {
-        for (let k = 0; k < V; k++) {
-            W2[j * V + k] -= LEARNING_RATE * dW2[j * V + k];
+        for (const langPair of otherLangs) {
+            if (!existingPrompts.has(langPair.prompt)) {
+                rawData.push(langPair);
+            }
         }
-    }
-    // b2 update
-    for (let k = 0; k < b2.length; k++) {
-        b2[k] -= LEARNING_RATE * db2[k];
-    }
-    // W1 update
-    for (let c = 0; c < dW1.length; c++) {
-        const len = W1[c].length;
-        for (let i = 0; i < len; i++) {
-            W1[c][i] -= LEARNING_RATE * dW1[c][i];
-        }
-    }
-    // b1 update
-    for (let j = 0; j < b1.length; j++) {
-        b1[j] -= LEARNING_RATE * db1[j];
-    }
-    // E update (only update for tokens active in context)
-    for (const idxStr in contextGrads) {
-        const idx = parseInt(idxStr, 10);
-        const grad = contextGrads[idx];
-        const embOffset = idx * EMBED_DIM;
-        for (let d = 0; d < EMBED_DIM; d++) {
-            E[embOffset + d] -= LEARNING_RATE * grad[d];
-        }
+
+        fs.writeFileSync(DATA_FILE, JSON.stringify(rawData, null, 4));
+        console.log("Updated training_data.json with external sources and multi-language support.");
+    } catch (e) {
+        console.error("Error fetching data:", e);
     }
 }
 
 // --- MAIN TRAINING WORKER ---
-function startTraining() {
+async function startTraining() {
+    await augmentTrainingData();
+
     if (!fs.existsSync(DATA_FILE)) {
         console.error(`Error: Training data not found at ${DATA_FILE}`);
         process.exit(1);
@@ -272,7 +198,6 @@ function startTraining() {
     console.log("Loading training data...");
     const rawData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
 
-    // Step 1: Tokenize all pairs and build vocabulary
     const corpusTokens = [];
     const trainingPairs = [];
 
@@ -292,7 +217,6 @@ function startTraining() {
 
     console.log(`Vocabulary built. Size: ${vocab.length} unique tokens.`);
 
-    // Step 2: Build Context Window Dataset
     const padIdx = vocabMap.get('<pad>');
     const startIdx = vocabMap.get('<start>');
     const sepIdx = vocabMap.get('<sep>');
@@ -312,7 +236,6 @@ function startTraining() {
         ];
 
         for (let i = 0; i < sequence.length; i++) {
-            // context consists of previous CONTEXT_WINDOW tokens
             const context = [];
             for (let c = CONTEXT_WINDOW; c >= 1; c--) {
                 const seqIdx = i - c;
@@ -329,51 +252,54 @@ function startTraining() {
 
     console.log(`Dataset generated with ${dataset.length} training examples.`);
 
-    // Step 3: Load existing weights or initialize new ones
-    let weights;
+    let model = buildModel(vocab.length);
     let startEpoch = 0;
+
     if (fs.existsSync(WEIGHTS_FILE)) {
         console.log(`Existing model weights found at ${WEIGHTS_FILE}. Loading...`);
         try {
             const savedData = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
-            // Ensure vocabulary matches
             if (JSON.stringify(savedData.vocab) === JSON.stringify(vocab)) {
                 const w = savedData.weights;
 
                 const getArray = (val) => Array.isArray(val) ? val : Object.values(val);
 
-                let parsedW1;
+                const E_tensor = tf.tensor2d(getArray(w.E), [vocab.length, EMBED_DIM]);
+
+                const flatW1 = new Float32Array(CONTEXT_WINDOW * EMBED_DIM * HIDDEN_SIZE);
+                let W1_raw;
                 if (Array.isArray(w.W1) && Array.isArray(w.W1[0])) {
-                    parsedW1 = w.W1.map(arr => new Float32Array(arr));
+                    W1_raw = w.W1;
                 } else {
-                    const flatW1 = getArray(w.W1);
+                    const tmpFlatW1 = getArray(w.W1);
                     const chunkSize = EMBED_DIM * HIDDEN_SIZE;
-                    parsedW1 = new Array(CONTEXT_WINDOW);
+                    W1_raw = new Array(CONTEXT_WINDOW);
                     for (let c = 0; c < CONTEXT_WINDOW; c++) {
-                        parsedW1[c] = new Float32Array(flatW1.slice(c * chunkSize, (c + 1) * chunkSize));
+                        W1_raw[c] = tmpFlatW1.slice(c * chunkSize, (c + 1) * chunkSize);
                     }
                 }
 
-                weights = {
-                    E: new Float32Array(getArray(w.E)),
-                    W1: parsedW1,
-                    b1: new Float32Array(getArray(w.b1)),
-                    W2: new Float32Array(getArray(w.W2)),
-                    b2: new Float32Array(getArray(w.b2))
-                };
+                for(let c=0; c<CONTEXT_WINDOW; c++) {
+                    flatW1.set(W1_raw[c], c * EMBED_DIM * HIDDEN_SIZE);
+                }
+                const W1_tensor = tf.tensor2d(flatW1, [CONTEXT_WINDOW * EMBED_DIM, HIDDEN_SIZE]);
+
+                const b1_tensor = tf.tensor1d(getArray(w.b1));
+                const W2_tensor = tf.tensor2d(getArray(w.W2), [HIDDEN_SIZE, vocab.length]);
+                const b2_tensor = tf.tensor1d(getArray(w.b2));
+
+                model.layers[0].setWeights([E_tensor]);
+                model.layers[2].setWeights([W1_tensor, b1_tensor]);
+                model.layers[3].setWeights([W2_tensor, b2_tensor]);
+
                 startEpoch = savedData.epoch || 0;
                 console.log(`Resuming training from epoch ${startEpoch}...`);
             } else {
                 console.log("Vocabulary changed. Re-initializing weights.");
-                weights = initRandomWeights(vocab.length);
             }
         } catch (e) {
             console.warn("Failed to load weights file, initializing random weights:", e);
-            weights = initRandomWeights(vocab.length);
         }
-    } else {
-        console.log("No weights file found. Initializing random weights...");
-        weights = initRandomWeights(vocab.length);
     }
 
     console.log("\n=============================================");
@@ -382,14 +308,18 @@ function startTraining() {
     console.log(`   To stop, run PowerShell: .\\stop-training.ps1`);
     console.log("=============================================\n");
 
+    const batchSize = 64;
+    const xs = tf.tensor2d(dataset.map(d => d.context), [dataset.length, CONTEXT_WINDOW], 'int32');
+    // For sparseCategoricalCrossentropy, targets should be 1D integer
+    const ys = tf.tensor1d(dataset.map(d => d.target), 'int32');
+
     let epoch = startEpoch;
     
-    function trainStep() {
-        // Check for stop file
+    while(true) {
         if (fs.existsSync(STOP_FILE)) {
             console.log("\n[Stop Signal Detected]");
-            // Save final weights
-            saveWeights(weights, vocab, epoch);
+            const extractedWeights = await extractWeights(model);
+            saveWeights(extractedWeights, vocab, epoch);
             try {
                 fs.unlinkSync(STOP_FILE);
             } catch (err) {}
@@ -397,44 +327,30 @@ function startTraining() {
             process.exit(0);
         }
 
-        // Shuffle dataset
-        for (let i = dataset.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [dataset[i], dataset[j]] = [dataset[j], dataset[i]];
-        }
+        const h = await model.fit(xs, ys, {
+            batchSize: batchSize,
+            epochs: 1,
+            shuffle: true,
+            verbose: 0
+        });
 
-        let totalLoss = 0;
-
-        for (let i = 0; i < dataset.length; i++) {
-            const { context, target } = dataset[i];
-            const forwardRes = forward(context, weights);
-            const loss = -Math.log(forwardRes.probs[target] || 1e-10);
-            totalLoss += loss;
-
-            const grads = backward(context, target, weights, forwardRes);
-            updateWeights(weights, grads);
-        }
-
-        const avgLoss = totalLoss / dataset.length;
         epoch++;
+        const loss = h.history.loss[0];
 
         if (epoch % 5 === 0 || epoch === 1) {
-            console.log(`Epoch ${epoch} | Average Cross-Entropy Loss: ${avgLoss.toFixed(6)}`);
+            console.log(`Epoch ${epoch} | Average Cross-Entropy Loss: ${loss.toFixed(6)}`);
         }
 
         if (epoch % SAVE_INTERVAL_EPOCHS === 0) {
-            saveWeights(weights, vocab, epoch);
+            const extractedWeights = await extractWeights(model);
+            saveWeights(extractedWeights, vocab, epoch);
         }
 
-        // Run next epoch asynchronously to yield CPU/avoid locking process completely
-        setImmediate(trainStep);
+        await new Promise(r => setImmediate(r));
     }
-
-    trainStep();
 }
 
 function saveWeights(weights, vocab, epoch) {
-    // Convert Float32Array to standard Arrays for JSON serialization
     const serializableWeights = {
         E: Array.from(weights.E),
         W1: weights.W1.map(arr => Array.from(arr)),
@@ -442,7 +358,6 @@ function saveWeights(weights, vocab, epoch) {
         W2: Array.from(weights.W2),
         b2: Array.from(weights.b2)
     };
-
     const payload = {
         epoch,
         vocab,
@@ -456,5 +371,4 @@ function saveWeights(weights, vocab, epoch) {
     }
 }
 
-// Start execution
 startTraining();
