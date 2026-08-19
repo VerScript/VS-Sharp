@@ -336,7 +336,7 @@ function fixVerScriptCode(code) {
     const lines = code.split('\n');
     const fixed = lines.map(line => {
         let trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('!')) return line;
+        if (!trimmed || hasInlineComment(trimmed) === 0) return line;
 
         let commentIdx = hasInlineComment(trimmed);
         let codePart = commentIdx !== -1 ? trimmed.substring(0, commentIdx).trim() : trimmed;
@@ -399,7 +399,7 @@ function addCommentsToCode(code) {
     const lines = code.split('\n');
     return lines.map(line => {
         let trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('!')) return line;
+        if (!trimmed || hasInlineComment(trimmed) === 0) return line;
 
         const commentIdx = hasInlineComment(trimmed);
         if (commentIdx !== -1) return line; // already commented
