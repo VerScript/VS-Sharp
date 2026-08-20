@@ -91,16 +91,17 @@ function buildModel(vocabSize) {
 // Helper to manually extract weights for saving in the format expected by server.js
 async function extractWeights(model) {
     const E = await model.layers[0].getWeights()[0].data();
-    const W1 = await model.layers[2].getWeights()[0].data();
+    const w1Tensor = model.layers[2].getWeights()[0];
     const b1 = await model.layers[2].getWeights()[1].data();
     const W2 = await model.layers[3].getWeights()[0].data();
     const b2 = await model.layers[3].getWeights()[1].data();
 
-    const chunkSize = EMBED_DIM * HIDDEN_SIZE;
+    const w1Chunks = tf.split(w1Tensor, CONTEXT_WINDOW, 0);
     const parsedW1 = new Array(CONTEXT_WINDOW);
     for (let c = 0; c < CONTEXT_WINDOW; c++) {
-        parsedW1[c] = W1.subarray(c * chunkSize, (c + 1) * chunkSize);
+        parsedW1[c] = await w1Chunks[c].data();
     }
+    tf.dispose(w1Chunks);
 
     return {
         E: E,
@@ -266,7 +267,6 @@ async function startTraining() {
 
                 const E_tensor = tf.tensor2d(getArray(w.E), [vocab.length, EMBED_DIM]);
 
-                const flatW1 = new Float32Array(CONTEXT_WINDOW * EMBED_DIM * HIDDEN_SIZE);
                 let W1_raw;
                 if (Array.isArray(w.W1) && Array.isArray(w.W1[0])) {
                     W1_raw = w.W1;
@@ -279,10 +279,11 @@ async function startTraining() {
                     }
                 }
 
+                const w1Tensors = [];
                 for(let c=0; c<CONTEXT_WINDOW; c++) {
-                    flatW1.set(W1_raw[c], c * EMBED_DIM * HIDDEN_SIZE);
+                    w1Tensors.push(tf.tensor2d(W1_raw[c], [EMBED_DIM, HIDDEN_SIZE]));
                 }
-                const W1_tensor = tf.tensor2d(flatW1, [CONTEXT_WINDOW * EMBED_DIM, HIDDEN_SIZE]);
+                const W1_tensor = tf.concat(w1Tensors, 0);
 
                 const b1_tensor = tf.tensor1d(getArray(w.b1));
                 const W2_tensor = tf.tensor2d(getArray(w.W2), [HIDDEN_SIZE, vocab.length]);
