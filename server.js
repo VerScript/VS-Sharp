@@ -109,11 +109,11 @@ function generateLLMResponse(message, weightsData) {
 
         // W1: Originally Array of Float32Array length C. Each Float32Array is EMBED_DIM * HIDDEN_SIZE.
         // We want a single tensor [CONTEXT_WINDOW * EMBED_DIM, HIDDEN_SIZE]
-        const flatW1 = new Float32Array(CONTEXT_WINDOW * EMBED_DIM * HIDDEN_SIZE);
+        const w1Tensors = [];
         for(let c=0; c<CONTEXT_WINDOW; c++) {
-            flatW1.set(weights.W1[c], c * EMBED_DIM * HIDDEN_SIZE);
+            w1Tensors.push(tf.tensor2d(weights.W1[c], [EMBED_DIM, HIDDEN_SIZE]));
         }
-        const W1 = tf.tensor2d(flatW1, [CONTEXT_WINDOW * EMBED_DIM, HIDDEN_SIZE]);
+        const W1 = tf.concat(w1Tensors, 0);
 
         const b1 = tf.tensor1d(weights.b1);
         const W2 = tf.tensor2d(weights.W2, [HIDDEN_SIZE, vocab.length]);
