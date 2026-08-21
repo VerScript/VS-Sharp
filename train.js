@@ -311,8 +311,8 @@ async function startTraining() {
 
     const batchSize = 64;
     const xs = tf.tensor2d(dataset.map(d => d.context), [dataset.length, CONTEXT_WINDOW], 'int32');
-    // For sparseCategoricalCrossentropy, targets should be 1D integer
-    const ys = tf.tensor1d(dataset.map(d => d.target), 'int32');
+    // For sparseCategoricalCrossentropy, targets should be 1D float32 to prevent floor error in tfjs
+    const ys = tf.tensor1d(dataset.map(d => d.target), 'float32');
 
     let epoch = startEpoch;
     
