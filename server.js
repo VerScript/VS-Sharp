@@ -93,11 +93,9 @@ function generateLLMResponse(message, weightsData) {
     const getIdx = t => vocabMap.has(t) ? vocabMap.get(t) : unkIdx;
 
     const promptTokens = tokenize(message);
-    const sequenceIdxs = [
-        startIdx,
-        ...promptTokens.map(getIdx),
-        sepIdx
-    ];
+    const sequenceIdxs = [startIdx];
+    for (let token of promptTokens) { sequenceIdxs.push(getIdx(token)); }
+    sequenceIdxs.push(sepIdx);
 
     const generatedTokens = [];
     const maxGenLength = 200;

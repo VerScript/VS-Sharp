@@ -159,6 +159,30 @@ async function augmentTrainingData() {
             }
         }
 
+
+        const ideSample = await fetchUrl('https://raw.githubusercontent.com/VerScript/IDE/main/README.md');
+        if (ideSample && ideSample.length > 0 && !ideSample.includes('404: Not Found')) {
+            const idePrompt = "Explain the IDE architecture or provide a prompt for it";
+            if (!existingPrompts.has(idePrompt)) {
+                rawData.push({
+                    prompt: idePrompt,
+                    response: "### VerScript Web IDE\n\nThe Web IDE for VerScript allows users to write and test VerScript directly in the browser. It communicates with backend execution servers (like VS-Sharp and PolyServer).\n\nIf you need a prompt for the IDE section: \"Create a modern, dark-themed Web IDE interface for VerScript with syntax highlighting, an output console, and a connection to the PolyServer runner API.\"\n\nCode snippet context:\n```javascript\n### VerScript Web IDE\nThe Web IDE for VerScript...\n```"
+                });
+            }
+        }
+
+
+        const cArchSample = await fetchUrl('https://raw.githubusercontent.com/VerScript/VerScript/main/src/main.c');
+        if (cArchSample && cArchSample.length > 0 && !cArchSample.includes('404: Not Found')) {
+            const cArchPrompt = "What does the VerScript C architecture look like?";
+            if (!existingPrompts.has(cArchPrompt)) {
+                rawData.push({
+                    prompt: cArchPrompt,
+                    response: "### VerScript Core Architecture\n\nThe core of VerScript is written in C. It includes parsers, tokenizers, and interpreters for language statements like display, prompt, loop, and if. Here is a brief look at the C source:\n\n```c\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <ctype.h>\n#include <stdarg.h>\n#include <setjmp.h>\n#include \"../include/opcodes.h\"\n#include \"../include/lexer.h\"\n\ntypedef enum { VAR_INT, VAR_STRING, VAR_BOOL } VarType;\n\ntypedef struct {\n    char *name;\n    VarType type;\n    int int_val;\n    char *string_val;\n} Variable;\n\nVariable *symtable = NULL;\nint var_count = 0;\nint var_capacity = 0;\n\n#define MAX_JMP_STACK 64\njmp_buf jmp_env_stack[MAX_JMP_STACK];\nint jmp_stack_ptr = 0;\n\n#de...\n```"
+                });
+            }
+        }
+
         const otherLangs = [
             {
                 prompt: "Write a python script to calculate factorial",
@@ -206,7 +230,8 @@ async function startTraining() {
         const pTokens = tokenize(pair.prompt);
         const rTokens = tokenize(pair.response);
         
-        corpusTokens.push(...pTokens, ...rTokens);
+        for (let token of pTokens) { corpusTokens.push(token); }
+        for (let token of rTokens) { corpusTokens.push(token); }
         trainingPairs.push({ pTokens, rTokens });
     });
 
@@ -228,13 +253,11 @@ async function startTraining() {
 
     const dataset = [];
     trainingPairs.forEach(pair => {
-        const sequence = [
-            startIdx,
-            ...pair.pTokens.map(getIdx),
-            sepIdx,
-            ...pair.rTokens.map(getIdx),
-            endIdx
-        ];
+        const sequence = [startIdx];
+        for (let token of pair.pTokens) { sequence.push(getIdx(token)); }
+        sequence.push(sepIdx);
+        for (let token of pair.rTokens) { sequence.push(getIdx(token)); }
+        sequence.push(endIdx);
 
         for (let i = 0; i < sequence.length; i++) {
             const context = [];
