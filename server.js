@@ -49,7 +49,7 @@ function tokenize(text) {
 // --- TENSORFLOW FORWARD PASS ---
 function forwardTF(contextIdxs, tfWeights) {
     return tf.tidy(() => {
-        const { E, W1, b1, W2, b2 } = tfWeights;
+        const { E, w1Tensors, b1, W2, b2 } = tfWeights;
         const C = contextIdxs.length;
 
         // 1. Get Embeddings
@@ -63,9 +63,14 @@ function forwardTF(contextIdxs, tfWeights) {
         // Actually, original code does:
         // for c in C, d in D: sum += x[c*D+d] * W1[c][d*H+j]
         // So W1_flat can be seen as [C * embedDim, hiddenSize]
-        // Let's reshape x to [1, C * embedDim] and W1 to [C * embedDim, hiddenSize]
-        const xFlat = x.reshape([1, -1]);
-        const h = tf.tanh(tf.add(tf.matMul(xFlat, W1), b1)); // Shape: [1, hiddenSize]
+        // Let's perform the sum(x[c] * W1[c]) over the chunks to avoid the massive tf.concat
+        let hSum = tf.zeros([1, HIDDEN_SIZE]);
+        for (let c = 0; c < C; c++) {
+            const xc = x.slice([c, 0], [1, EMBED_DIM]); // shape [1, embedDim]
+            hSum = tf.add(hSum, tf.matMul(xc, w1Tensors[c]));
+        }
+
+        const h = tf.tanh(tf.add(hSum, b1)); // Shape: [1, hiddenSize]
 
         // 3. Output Logits: logits = h * W2 + b2
         // h is [1, hiddenSize], W2 is [hiddenSize, vocabSize]
@@ -106,18 +111,18 @@ function generateLLMResponse(message, weightsData) {
         const E = tf.tensor2d(weights.E, [vocab.length, EMBED_DIM]);
 
         // W1: Originally Array of Float32Array length C. Each Float32Array is EMBED_DIM * HIDDEN_SIZE.
-        // We want a single tensor [CONTEXT_WINDOW * EMBED_DIM, HIDDEN_SIZE]
+        // We pass this array of chunked tensors directly to avoid tf.concat which triggers
+        // an excessive memory allocation over 10% of system memory per request.
         const w1Tensors = [];
         for(let c=0; c<CONTEXT_WINDOW; c++) {
             w1Tensors.push(tf.tensor2d(weights.W1[c], [EMBED_DIM, HIDDEN_SIZE]));
         }
-        const W1 = tf.concat(w1Tensors, 0);
 
         const b1 = tf.tensor1d(weights.b1);
         const W2 = tf.tensor2d(weights.W2, [HIDDEN_SIZE, vocab.length]);
         const b2 = tf.tensor1d(weights.b2);
 
-        return { E, W1, b1, W2, b2 };
+        return { E, w1Tensors, b1, W2, b2 };
     });
 
     for (let step = 0; step < maxGenLength; step++) {

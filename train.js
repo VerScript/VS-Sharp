@@ -316,6 +316,8 @@ async function startTraining() {
                 model.layers[2].setWeights([W1_tensor, b1_tensor]);
                 model.layers[3].setWeights([W2_tensor, b2_tensor]);
 
+                tf.dispose([E_tensor, W1_tensor, b1_tensor, W2_tensor, b2_tensor, ...w1Tensors]);
+
                 startEpoch = savedData.epoch || 0;
                 console.log(`Resuming training from epoch ${startEpoch}...`);
             } else {
