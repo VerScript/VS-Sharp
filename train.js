@@ -96,12 +96,13 @@ async function extractWeights(model) {
     const W2 = await model.layers[3].getWeights()[0].data();
     const b2 = await model.layers[3].getWeights()[1].data();
 
-    const w1Chunks = tf.split(w1Tensor, CONTEXT_WINDOW, 0);
     const parsedW1 = new Array(CONTEXT_WINDOW);
+    const chunkSize = w1Tensor.shape[0] / CONTEXT_WINDOW;
     for (let c = 0; c < CONTEXT_WINDOW; c++) {
-        parsedW1[c] = await w1Chunks[c].data();
+        const chunk = tf.slice(w1Tensor, [c * chunkSize, 0], [chunkSize, w1Tensor.shape[1]]);
+        parsedW1[c] = await chunk.data();
+        tf.dispose(chunk);
     }
-    tf.dispose(w1Chunks);
 
     return {
         E: E,
@@ -377,23 +378,37 @@ async function startTraining() {
 }
 
 function saveWeights(weights, vocab, epoch) {
-    const serializableWeights = {
-        E: Array.from(weights.E),
-        W1: weights.W1.map(arr => Array.from(arr)),
-        b1: Array.from(weights.b1),
-        W2: Array.from(weights.W2),
-        b2: Array.from(weights.b2)
-    };
-    const payload = {
-        epoch,
-        vocab,
-        weights: serializableWeights
-    };
+    let fd;
     try {
-        fs.writeFileSync(WEIGHTS_FILE, JSON.stringify(payload, null, 2), 'utf8');
+        fd = fs.openSync(WEIGHTS_FILE, 'w');
+        fs.writeSync(fd, `{\n  "epoch": ${epoch},\n  "vocab": ${JSON.stringify(vocab)},\n  "weights": {\n`);
+
+        // Write E
+        fs.writeSync(fd, `    "E": [${Array.from(weights.E).join(',')}],\n`);
+
+        // Write W1
+        fs.writeSync(fd, `    "W1": [\n`);
+        for (let i = 0; i < weights.W1.length; i++) {
+            fs.writeSync(fd, `      [${Array.from(weights.W1[i]).join(',')}]${i < weights.W1.length - 1 ? ',' : ''}\n`);
+        }
+        fs.writeSync(fd, `    ],\n`);
+
+        // Write b1
+        fs.writeSync(fd, `    "b1": [${Array.from(weights.b1).join(',')}],\n`);
+
+        // Write W2
+        fs.writeSync(fd, `    "W2": [${Array.from(weights.W2).join(',')}],\n`);
+
+        // Write b2
+        fs.writeSync(fd, `    "b2": [${Array.from(weights.b2).join(',')}]\n  }\n}\n`);
+
         console.log(`[Weights Saved] Saved checkpoint for epoch ${epoch} to ${WEIGHTS_FILE}`);
     } catch (e) {
         console.error("Failed to save weights:", e);
+    } finally {
+        if (typeof fd !== 'undefined') {
+            fs.closeSync(fd);
+        }
     }
 }
 
