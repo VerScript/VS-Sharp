@@ -379,28 +379,55 @@ async function startTraining() {
 
 function saveWeights(weights, vocab, epoch) {
     let fd;
+    const CHUNK_SIZE = 50000;
+
+    function writeChunked(fd, arr, isLast = true) {
+        for (let i = 0; i < arr.length; i += CHUNK_SIZE) {
+            const chunk = arr.subarray(i, i + CHUNK_SIZE);
+            fs.writeSync(fd, Array.from(chunk).join(','));
+            if (i + CHUNK_SIZE < arr.length) {
+                fs.writeSync(fd, ',');
+            }
+        }
+        if (!isLast) {
+            fs.writeSync(fd, ',\n');
+        } else {
+            fs.writeSync(fd, '\n');
+        }
+    }
+
     try {
         fd = fs.openSync(WEIGHTS_FILE, 'w');
         fs.writeSync(fd, `{\n  "epoch": ${epoch},\n  "vocab": ${JSON.stringify(vocab)},\n  "weights": {\n`);
 
         // Write E
-        fs.writeSync(fd, `    "E": [${Array.from(weights.E).join(',')}],\n`);
+        fs.writeSync(fd, `    "E": [`);
+        writeChunked(fd, weights.E, true);
+        fs.writeSync(fd, `],\n`);
 
         // Write W1
         fs.writeSync(fd, `    "W1": [\n`);
         for (let i = 0; i < weights.W1.length; i++) {
-            fs.writeSync(fd, `      [${Array.from(weights.W1[i]).join(',')}]${i < weights.W1.length - 1 ? ',' : ''}\n`);
+            fs.writeSync(fd, `      [`);
+            writeChunked(fd, weights.W1[i], true);
+            fs.writeSync(fd, `]${i < weights.W1.length - 1 ? ',' : ''}\n`);
         }
         fs.writeSync(fd, `    ],\n`);
 
         // Write b1
-        fs.writeSync(fd, `    "b1": [${Array.from(weights.b1).join(',')}],\n`);
+        fs.writeSync(fd, `    "b1": [`);
+        writeChunked(fd, weights.b1, true);
+        fs.writeSync(fd, `],\n`);
 
         // Write W2
-        fs.writeSync(fd, `    "W2": [${Array.from(weights.W2).join(',')}],\n`);
+        fs.writeSync(fd, `    "W2": [`);
+        writeChunked(fd, weights.W2, true);
+        fs.writeSync(fd, `],\n`);
 
         // Write b2
-        fs.writeSync(fd, `    "b2": [${Array.from(weights.b2).join(',')}]\n  }\n}\n`);
+        fs.writeSync(fd, `    "b2": [`);
+        writeChunked(fd, weights.b2, true);
+        fs.writeSync(fd, `]\n  }\n}\n`);
 
         console.log(`[Weights Saved] Saved checkpoint for epoch ${epoch} to ${WEIGHTS_FILE}`);
     } catch (e) {
