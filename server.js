@@ -318,7 +318,7 @@ function includesOutsideString(line, searchStr, requireWordBoundary = false) {
     }
     return false;
 }
-function replaceOutsideString(line, searchStr, replaceStr) {
+function replaceOutsideString(line, searchStr, replaceStr, requireWordBoundary = false) {
     let inString = false;
     for (let i = 0; i <= line.length - searchStr.length; i++) {
         if (line[i] === '"') {
@@ -326,7 +326,16 @@ function replaceOutsideString(line, searchStr, replaceStr) {
         } else if (!inString && line[i] === '!') {
             break;
         } else if (!inString && line.substring(i, i + searchStr.length) === searchStr) {
-            return line.substring(0, i) + replaceStr + line.substring(i + searchStr.length);
+            if (requireWordBoundary) {
+                const prevChar = i > 0 ? line[i - 1] : '';
+                const nextChar = i + searchStr.length < line.length ? line[i + searchStr.length] : '';
+                const isWordChar = (char) => /[a-zA-Z0-9_]/.test(char);
+                if (!isWordChar(prevChar) && !isWordChar(nextChar)) {
+                    return line.substring(0, i) + replaceStr + line.substring(i + searchStr.length);
+                }
+            } else {
+                return line.substring(0, i) + replaceStr + line.substring(i + searchStr.length);
+            }
         }
     }
     return line;
@@ -346,7 +355,7 @@ function fixVerScriptCode(code) {
         
         // 1. Fix missing space after display
         if (/^display[^a-zA-Z0-9_\s]/.test(codePart)) {
-            line = replaceOutsideString(line, 'display', 'display ');
+            line = replaceOutsideString(line, 'display', 'display ', true);
             trimmed = line.trim();
             commentIdx = hasInlineComment(trimmed);
             codePart = commentIdx !== -1 ? trimmed.substring(0, commentIdx).trim() : trimmed;
