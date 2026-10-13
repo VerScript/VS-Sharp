@@ -384,7 +384,7 @@ function saveWeights(weights, vocab, epoch) {
     function writeChunked(fd, arr, isLast = true) {
         for (let i = 0; i < arr.length; i += CHUNK_SIZE) {
             const chunk = arr.subarray(i, i + CHUNK_SIZE);
-            fs.writeSync(fd, Array.from(chunk).join(','));
+            fs.writeSync(fd, chunk.join(','));
             if (i + CHUNK_SIZE < arr.length) {
                 fs.writeSync(fd, ',');
             }
