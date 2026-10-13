@@ -392,7 +392,7 @@ function fixVerScriptCode(code) {
 
         // 4. Fix assignment with '=' or ':=' instead of ':'
         const assignmentMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(:=|=)\s*(.*)$/);
-        const hasKeyword = /^(display|prompt|loop|iterate|if|while|until|do|unless|throw|ForceErrors|CriticalErrors|SuppressErrors|else|external|internal|error|step)\b/.test(trimmed);
+        const hasKeyword = /^(display|prompt|loop|iterate|if|while|until|do|unless|throw|ForceErrors|CriticalErrors|SuppressErrors|else|external|internal|error|step|DataType|extends|it|num|bool|str|arr|entity|set|def|func|method|reply|class|lib|library|Pseudo|Random)\b/.test(trimmed);
         if (assignmentMatch && !hasKeyword) {
             const varName = assignmentMatch[1];
             const varVal = assignmentMatch[3];
@@ -443,6 +443,12 @@ function addCommentsToCode(code) {
             comment = "Enter critical error filter scope";
         } else if (/^ForceErrors\b/.test(trimmed)) {
             comment = "Enter force error scope";
+        } else if (/^DataType\b/.test(trimmed)) {
+            comment = "Custom datatype definition";
+        } else if (/^(num|bool|str|arr|entity)\b/.test(trimmed)) {
+            comment = "Type-constrained variable declaration";
+        } else if (/^(Pseudo|Random)\b/.test(trimmed)) {
+            comment = "Native PRNG engine execution";
         } else {
             let hasAssign = false;
             let inString = false;
