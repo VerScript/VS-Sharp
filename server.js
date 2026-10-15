@@ -392,7 +392,7 @@ function fixVerScriptCode(code) {
 
         // 4. Fix assignment with '=' or ':=' instead of ':'
         const assignmentMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(:=|=)\s*(.*)$/);
-        const hasKeyword = /^(display|prompt|loop|iterate|if|while|until|do|unless|throw|ForceErrors|CriticalErrors|SuppressErrors|else|external|internal|error|step|DataType|extends|it|num|bool|str|arr|entity|set|def|func|method|reply|class|lib|library|Pseudo|Random)\b/.test(trimmed);
+        const hasKeyword = /^(display|prompt|loop|iterate|if|while|until|do|unless|throw|ForceErrors|CriticalErrors|SuppressErrors|else|external|internal|error|step|DataType|extends|it|num|bool|str|arr|entity|set|def|func|method|reply|class|lib|library|Pseudo|Random|temp|inst|del|on|when|emit|async|sync|guard|chan|send|recv|match|with|pipe)\b/.test(trimmed);
         if (assignmentMatch && !hasKeyword) {
             const varName = assignmentMatch[1];
             const varVal = assignmentMatch[3];
@@ -503,7 +503,7 @@ function mountRoutes(app, basePath) {
         // Ensure binary is executable
         try { fs.chmodSync(VERSCRIPT_BIN, 0o755); } catch(_) {}
 
-        execFile(VERSCRIPT_BIN, [tmpFile], { timeout: 10000 }, (error, stdout, stderr) => {
+        execFile(VERSCRIPT_BIN, [tmpFile], { timeout: 10000, cwd: path.dirname(VERSCRIPT_BIN) }, (error, stdout, stderr) => {
             try { fs.unlinkSync(tmpFile); } catch (_) {}
 
             if (error && error.killed) {
