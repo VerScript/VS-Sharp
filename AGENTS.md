@@ -1,43 +1,47 @@
 # AGENTS.md — VS-Sharp
 
-Instructions and context for autonomous AI coding agents (such as Google Jules).
+Instructions and context for autonomous AI coding agents.
 
 ## 🚀 Dev Environment & Commands
 - **Install Dependencies**: `npm install`
 - **Mount Routes**: Exported via `module.exports = { mountRoutes }` to be consumed by PolyServer.
 - **Run Standalone (Local Test)**: `node server.js`
+- **Dataset Generation**: `node build_dataset.js` (Ingests all VerScript organization repos and polyglot languages).
+- **Run Trainer**: `node train.js` (Trains the 15M parameter neural language model).
 
 ## 🧠 Neural Language Model (LLM) & Training
-- **Training Data**: Located in `knowledge/training_data.json` as prompt-response pairs.
-- **Background Trainer**: Run `node train.js` to start training the neural network from scratch.
-- **Stop Command**: To stop training safely, run the PowerShell script `.\stop-training.ps1` or write a `stop_training.txt` file in the directory.
-- **Shared Weights State**: Saves checkpoints dynamically to `model_weights.json`.
-- **Model Architecture**: Multi-Layer Perceptron (MLP) built completely from scratch using standard JavaScript (no TensorFlow/PyTorch).
-  - `E` (Embeddings): size `[vocab_size, EMBED_DIM (32)]`
-  - `W1` (Hidden weights): size `[CONTEXT_WINDOW (8) * EMBED_DIM (32), HIDDEN_SIZE (64)]`
-  - `b1` (Hidden biases): size `[HIDDEN_SIZE (64)]`
-  - `W2` (Output weights): size `[HIDDEN_SIZE (64), vocab_size]`
-  - `b2` (Output biases): size `[vocab_size]`
+- **Model Architecture**: **VS#-15M** (15 Million Parameters) deep neural network language model.
+  - Vocabulary: Dynamic across all VerScript org repos and polyglot codes.
+  - `Context Window`: 48 tokens.
+  - `Embedding Dimension (E)`: 256.
+  - `Hidden Layer 1 (W1)`: Dynamically calculated to target exactly 15,000,000 parameters.
+  - `Hidden Layer 2 (W2)`: 512 units (tanh).
+  - `Output Projection (W3)`: Logits over vocabulary size.
+- **Training Data**: Located in `knowledge/training_data.json` containing prompt-response pairs from:
+  - VerScript standard libraries, tests, and syntax examples.
+  - Polyglot languages accessible via the `inject` keyword (Python, JavaScript, C, HTML/CSS).
+  - Conversational speech, debugging, and line-by-line code explanations.
+- **Weights State**: Saves checkpoints dynamically to `model_weights.json`.
+- **Stop Command**: To stop training safely, create a `stop_training.txt` file or run `.\stop-training.ps1`.
 
 ## ⚙️ Path Resolution Rules
-- The C interpreter binary `verscript` is executed by the `/run` endpoint.
-- **Binary Resolution**: Always resolve the binary path using:
-  `const srcBin = path.join(process.cwd(), 'verscript_src', 'verscript');`
-  `const rootBin = path.join(process.cwd(), 'verscript');`
-  `const localBin = path.join(__dirname, 'verscript');`
-  `const VERSCRIPT_BIN = fs.existsSync(srcBin) ? srcBin : (fs.existsSync(rootBin) ? rootBin : localBin);`
-- Always verify read/write access and permissions before running.
+- The C interpreter binary `verscript` / `verscript.exe` is executed by the `/run` endpoint.
+- Binary resolution searches:
+  1. `process.cwd()/verscript`
+  2. `__dirname/verscript`
+  3. `../VerScript/verscript`
+  4. `../polyserver/verscript`
 
 ## 🛡️ Coding Guidelines & Rules
-- **No Third-Party ML Frameworks**: Absolutely no TensorFlow, PyTorch, or external API wrappers (OpenAI, Gemini) allowed. All network layers, backpropagation, and tokenizer must remain custom JS logic.
-- **Direct IDE Codespace Writing**: Ensure that if the AI assistant generates a response containing a ````verscript` code block, it compiles a payload in the JSON response:
+- **Pure Generated Responses Only**: VS# must NEVER return pre-written or canned answers. All conversational and code responses must be produced directly by the neural language model generator, no matter how gibberish or experimental.
+- **Action Payloads for IDE**: If the generated response contains a fenced code block (` ``` `), extract it and include it in the `action` payload:
   ```json
   {
-    "response": "Text explanation...",
+    "response": "...",
     "action": {
       "type": "edit",
       "code": "extracted_code_block"
     }
   }
   ```
-- **Tokenizer Consistency**: Keep tokenizer matching logic (`tokenize()`) identical between `train.js` and `server.js` to prevent index mismatch errors.
+- **Tokenizer Consistency**: Keep `tokenize()` identical across `train.js`, `build_dataset.js`, and `server.js`.

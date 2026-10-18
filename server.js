@@ -1,38 +1,38 @@
-// VS-Sharp — Custom Neural LLM + VerScript Runner
-// This module exports a function that mounts all routes onto an Express app.
-// It is designed to be consumed by PolyServer.
+// VS-Sharp — 15M Deep Neural Language Model + VerScript Runner
+// Mounts all routes onto an Express app to be consumed by PolyServer or run standalone.
 
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const os = require('os');
-const tf = require('@tensorflow/tfjs-node');
+
+let tf;
+try {
+    tf = require('@tensorflow/tfjs-node');
+} catch (_) {
+    tf = require('@tensorflow/tfjs');
+}
 
 const WEIGHTS_FILE = path.join(__dirname, 'model_weights.json');
 
-// --- VS#-1B MODEL CONFIGURATION (1 BILLION PARAMETERS) ---
-const MODEL_CONFIG = {
-    modelName: "VS#-1B",
-    parameterCount: 1000000000, // 1,000,000,000 Parameters
-    parameterDisplay: "1.0 Billion (1B)",
-    architecture: "VS#-1B Transformer & Neural Syntax Engine",
-    vocabSize: 32000,
-    contextWindow: 4096,
-    embedDim: 2048,
-    hiddenSize: 4096,
-    numLayers: 24,
-    numHeads: 32,
-    quantization: "INT8/FP16"
+// --- VS#-15M DEFAULT CONFIGURATION ---
+const DEFAULT_CONFIG = {
+    modelName: "VS#-15M",
+    parameterCount: 15000000,
+    parameterDisplay: "15.0 Million (15M)",
+    architecture: "VS#-15M Deep Neural Language Model & Polyglot Syntax Engine",
+    vocabSize: 6500,
+    contextWindow: 48,
+    embedDim: 256,
+    hiddenSize: 780,
+    hiddenSize2: 512,
+    quantization: "FP32"
 };
-
-const CONTEXT_WINDOW = 112;
-const EMBED_DIM = 2048;
-const HIDDEN_SIZE = 4096;
 
 // --- TOKENIZER ---
 function tokenize(text) {
     const tokens = [];
-    const regex = /(\r?\n|\w+|[^\w\s])/g;
+    const regex = /(\r?\n|[a-zA-Z0-9_]+|[^\s\w])/g;
     let match;
     while ((match = regex.exec(text)) !== null) {
         let t = match[0];
@@ -45,465 +45,269 @@ function tokenize(text) {
     return tokens;
 }
 
-
-// --- TENSORFLOW FORWARD PASS ---
+// --- TENSORFLOW 15M FORWARD PASS ---
 function forwardTF(contextIdxs, tfWeights) {
     return tf.tidy(() => {
-        const { E, w1Tensors, b1, W2, b2 } = tfWeights;
-        const C = contextIdxs.length;
+        const { E, W1, b1, W2, b2, W3, b3 } = tfWeights;
 
-        // 1. Get Embeddings
-        // E is [vocabSize, embedDim]
+        // 1. Embedding lookup: [C, EMBED_DIM]
         const indices = tf.tensor1d(contextIdxs, 'int32');
-        const x = tf.gather(E, indices); // Shape: [C, embedDim]
+        const x = tf.gather(E, indices);
 
-        // 2. Hidden Layer: h = tanh(flatten(x) * W1_flat + b1)
-        // Since W1 was originally stored per context position: [C, embedDim * hiddenSize]
-        // Flatten x: [C * embedDim]
-        // Actually, original code does:
-        // for c in C, d in D: sum += x[c*D+d] * W1[c][d*H+j]
-        // So W1_flat can be seen as [C * embedDim, hiddenSize]
-        // Let's perform the sum(x[c] * W1[c]) over the chunks to avoid the massive tf.concat
-        let hSum = tf.zeros([1, HIDDEN_SIZE]);
-        for (let c = 0; c < C; c++) {
-            const xc = x.slice([c, 0], [1, EMBED_DIM]); // shape [1, embedDim]
-            hSum = tf.add(hSum, tf.matMul(xc, w1Tensors[c]));
-        }
+        // 2. Flatten: [1, C * EMBED_DIM]
+        const xFlat = x.reshape([1, -1]);
 
-        const h = tf.tanh(tf.add(hSum, b1)); // Shape: [1, hiddenSize]
+        // 3. Dense Layer 1 (tanh): [1, H1]
+        const h1 = tf.tanh(tf.add(tf.matMul(xFlat, W1), b1));
 
-        // 3. Output Logits: logits = h * W2 + b2
-        // h is [1, hiddenSize], W2 is [hiddenSize, vocabSize]
-        const logits = tf.add(tf.matMul(h, W2), b2); // Shape: [1, vocabSize]
+        // 4. Dense Layer 2 (tanh): [1, H2]
+        const h2 = tf.tanh(tf.add(tf.matMul(h1, W2), b2));
 
-        // 4. Softmax
+        // 5. Output Logits: [1, vocabSize]
+        const logits = tf.add(tf.matMul(h2, W3), b3);
+
+        // 6. Softmax
         const probs = tf.softmax(logits).squeeze();
-
         return probs.arraySync();
     });
 }
 
-
-// --- GENERATE RESPONSE FROM LLM (TENSORFLOW) ---
+// --- NEURAL AUTOREGRESSIVE TEXT GENERATION ---
 function generateLLMResponse(message, weightsData) {
-    const { vocab, weights } = weightsData;
+    const { vocab, config, weights } = weightsData;
     const vocabMap = new Map(vocab.map((t, idx) => [t, idx]));
 
-    const padIdx = vocabMap.get('<pad>');
-    const startIdx = vocabMap.get('<start>');
-    const sepIdx = vocabMap.get('<sep>');
-    const endIdx = vocabMap.get('<end>');
-    const unkIdx = vocabMap.get('<unk>');
+    const padIdx = vocabMap.get('<pad>') ?? 0;
+    const startIdx = vocabMap.get('<start>') ?? 1;
+    const sepIdx = vocabMap.get('<sep>') ?? 2;
+    const endIdx = vocabMap.get('<end>') ?? 3;
+    const unkIdx = vocabMap.get('<unk>') ?? 4;
 
     const getIdx = t => vocabMap.has(t) ? vocabMap.get(t) : unkIdx;
 
+    const contextWindow = config?.contextWindow || 48;
+    const embedDim = config?.embedDim || 256;
+    const hiddenSize1 = config?.hiddenSize || 780;
+    const hiddenSize2 = config?.hiddenSize2 || 512;
+    const vocabSize = vocab.length;
+
     const promptTokens = tokenize(message);
     const sequenceIdxs = [startIdx];
-    for (let token of promptTokens) { sequenceIdxs.push(getIdx(token)); }
+    for (let token of promptTokens) {
+        sequenceIdxs.push(getIdx(token));
+    }
     sequenceIdxs.push(sepIdx);
 
     const generatedTokens = [];
-    const maxGenLength = 200;
+    const maxGenLength = 160;
 
     // Convert weights to tensors
     const tfWeights = tf.tidy(() => {
-        // E: [vocabSize, embedDim]
-        const E = tf.tensor2d(weights.E, [vocab.length, EMBED_DIM]);
-
-        // W1: Originally Array of Float32Array length C. Each Float32Array is EMBED_DIM * HIDDEN_SIZE.
-        // We pass this array of chunked tensors directly to avoid tf.concat which triggers
-        // an excessive memory allocation over 10% of system memory per request.
-        const w1Tensors = [];
-        for(let c=0; c<CONTEXT_WINDOW; c++) {
-            w1Tensors.push(tf.tensor2d(weights.W1[c], [EMBED_DIM, HIDDEN_SIZE]));
-        }
-
+        const E = tf.tensor2d(weights.E, [vocabSize, embedDim]);
+        const W1 = tf.tensor2d(weights.W1, [contextWindow * embedDim, hiddenSize1]);
         const b1 = tf.tensor1d(weights.b1);
-        const W2 = tf.tensor2d(weights.W2, [HIDDEN_SIZE, vocab.length]);
+        const W2 = tf.tensor2d(weights.W2, [hiddenSize1, hiddenSize2]);
         const b2 = tf.tensor1d(weights.b2);
+        const W3 = tf.tensor2d(weights.W3, [hiddenSize2, vocabSize]);
+        const b3 = tf.tensor1d(weights.b3);
 
-        return { E, w1Tensors, b1, W2, b2 };
+        return { E, W1, b1, W2, b2, W3, b3 };
     });
 
-    for (let step = 0; step < maxGenLength; step++) {
-        const context = [];
-        for (let c = CONTEXT_WINDOW; c >= 1; c--) {
-            const seqIdx = sequenceIdxs.length - c;
-            if (seqIdx < 0) {
-                context.push(padIdx);
-            } else {
-                context.push(sequenceIdxs[seqIdx]);
+    try {
+        for (let step = 0; step < maxGenLength; step++) {
+            const context = [];
+            for (let c = contextWindow; c >= 1; c--) {
+                const seqIdx = sequenceIdxs.length - c;
+                context.push(seqIdx < 0 ? padIdx : sequenceIdxs[seqIdx]);
             }
-        }
 
-        const probs = forwardTF(context, tfWeights);
+            const probs = forwardTF(context, tfWeights);
 
-        const temp = 0.9;
-        const logProbs = probs.map(p => Math.log(p + 1e-10) / temp);
-        let maxLog = -Infinity;
-        for (let i = 0; i < logProbs.length; i++) {
-            if (logProbs[i] > maxLog) maxLog = logProbs[i];
-        }
-        const tempExps = logProbs.map(lp => Math.exp(lp - maxLog));
-        const tempSum = tempExps.reduce((a, b) => a + b, 0);
-        const tempProbs = tempExps.map(te => te / (tempSum || 1e-10));
+            // Temperature sampling
+            const temp = 0.75;
+            const logProbs = probs.map(p => Math.log(p + 1e-10) / temp);
+            const maxLog = Math.max(...logProbs);
+            const tempExps = logProbs.map(lp => Math.exp(lp - maxLog));
+            const tempSum = tempExps.reduce((a, b) => a + b, 0);
+            const tempProbs = tempExps.map(te => te / (tempSum || 1e-10));
 
-        const r = Math.random();
-        let cumulative = 0;
-        let nextIdx = endIdx;
-        for (let i = 0; i < tempProbs.length; i++) {
-            cumulative += tempProbs[i];
-            if (r <= cumulative) {
-                nextIdx = i;
-                break;
+            const r = Math.random();
+            let cumulative = 0;
+            let nextIdx = endIdx;
+            for (let i = 0; i < tempProbs.length; i++) {
+                cumulative += tempProbs[i];
+                if (r <= cumulative) {
+                    nextIdx = i;
+                    break;
+                }
             }
+
+            if (nextIdx === endIdx) break;
+
+            sequenceIdxs.push(nextIdx);
+            generatedTokens.push(vocab[nextIdx]);
         }
-
-        if (nextIdx === endIdx) break;
-
-        sequenceIdxs.push(nextIdx);
-        generatedTokens.push(vocab[nextIdx]);
+    } finally {
+        tf.dispose(tfWeights);
     }
 
-    // Dispose tf weights
-    tf.dispose(tfWeights);
-
-    // Decode generated tokens
+    // Decode generated tokens into clean text
     let responseText = "";
     generatedTokens.forEach((t) => {
         if (t === '\n') {
             responseText += '\n';
         } else {
-            if (responseText.length > 0 &&
+            if (
+                responseText.length > 0 &&
                 !responseText.endsWith('\n') &&
                 !responseText.endsWith('`') &&
+                !responseText.endsWith('(') &&
+                !responseText.endsWith('[') &&
+                !responseText.endsWith('{') &&
                 t !== '.' &&
                 t !== ',' &&
                 t !== '!' &&
                 t !== '?' &&
                 t !== ':' &&
-                t !== ';') {
+                t !== ';' &&
+                t !== ')' &&
+                t !== ']' &&
+                t !== '}'
+            ) {
                 responseText += ' ';
             }
             responseText += t;
         }
     });
 
-    let newResponse = "";
-    let inString = false;
-    let inComment = false;
-    for (let i = 0; i < responseText.length; i++) {
-        let char = responseText[i];
-
-        if (char === '\n') {
-            inString = false;
-            inComment = false;
-            newResponse += char;
-            continue;
-        }
-
-        if (char === '"' && !inComment) {
-            if (!inString) {
-                inString = true;
-                newResponse += char;
-                if (i + 1 < responseText.length && responseText[i + 1] === ' ') {
-                    i++;
-                }
-            } else {
-                inString = false;
-                if (newResponse.endsWith(' ')) {
-                    newResponse = newResponse.slice(0, -1);
-                }
-                newResponse += char;
-            }
-            continue;
-        }
-
-        if (char === '!' && !inString && !inComment) {
-            inComment = true;
-            if (newResponse.length > 0) {
-                let prev = newResponse[newResponse.length - 1];
-                if ((/[0-9]/.test(prev) || prev === '"') && prev !== ' ') {
-                    newResponse += ' ';
-                }
-            }
-            newResponse += char;
-            continue;
-        }
-
-        if (!inString && !inComment) {
-            if (char === '#' && responseText.substring(i, i + 5) === '# # #') {
-                newResponse += '###';
-                i += 4;
-                continue;
-            }
-
-            if (char === '\x60') {
-                if (responseText.substring(i, i + 5) === '\x60 \x60 \x60') {
-                    newResponse += '\x60\x60\x60';
-                    if (responseText.substring(i + 5, i + 15).toLowerCase() === ' verscript') {
-                        newResponse += 'verscript';
-                        i += 14;
-                    } else {
-                        i += 4;
-                    }
-                    continue;
-                }
-                if (responseText.substring(i, i + 13).toLowerCase() === '\x60\x60\x60 verscript') {
-                    newResponse += '\x60\x60\x60verscript';
-                    i += 12;
-                    continue;
-                }
-            }
-
-            if (char === ':') {
-                if (newResponse.length > 0) {
-                    let prev = newResponse[newResponse.length - 1];
-                    if (/[a-zA-Z0-9_]/.test(prev)) {
-                        newResponse += ' ';
-                    }
-                }
-                newResponse += char;
-                continue;
-            }
-        }
-
-        newResponse += char;
-    }
-    responseText = newResponse;
-
-    return responseText;
+    return responseText.trim();
 }
 
-// --- EXTRACT CODE BLOCK ---
+// --- EXTRACT CODE BLOCK FOR IDE BUFFER INJECTION ---
 function extractCodeBlock(text) {
-    const regex = /```verscript\r?\n([\s\S]*?)```/i;
-    const match = text.match(regex);
-    if (match) return match[1].trim();
-    
-    const fallbackRegex = /```\r?\n([\s\S]*?)```/;
-    const fallbackMatch = text.match(fallbackRegex);
-    return fallbackMatch ? fallbackMatch[1].trim() : null;
-}
-function hasInlineComment(line) {
-    let inString = false;
-    for (let i = 0; i < line.length; i++) {
-        if (line[i] === '"') {
-            inString = !inString;
-        } else if (line[i] === '!' && !inString) {
-            return i;
-        }
+    if (!text) return null;
+    // Match language-tagged or untagged code blocks
+    const match = text.match(/```(?:[a-zA-Z0-9_-]+)?\r?\n([\s\S]*?)```/);
+    if (match && match[1].trim()) {
+        return match[1].trim();
     }
-    return -1;
+    return null;
 }
-function includesOutsideString(line, searchStr, requireWordBoundary = false) {
-    let inString = false;
-    for (let i = 0; i <= line.length - searchStr.length; i++) {
-        if (line[i] === '"') {
-            inString = !inString;
-        } else if (!inString && line[i] === '!') {
-            return false;
-        } else if (!inString && line.substring(i, i + searchStr.length) === searchStr) {
-            if (requireWordBoundary) {
-                const prevChar = i > 0 ? line[i - 1] : '';
-                const nextChar = i + searchStr.length < line.length ? line[i + searchStr.length] : '';
-                const isWordChar = (char) => /[a-zA-Z0-9_]/.test(char);
-                if (!isWordChar(prevChar) && !isWordChar(nextChar)) {
-                    return true;
-                }
-            } else {
-                return true;
-            }
-        }
+
+// --- RESOLVE VERSCRIPT BINARY ---
+function resolveVerScriptBinary() {
+    const isWin = os.platform() === 'win32';
+    const binName = isWin ? 'verscript.exe' : 'verscript';
+
+    const candidates = [
+        path.join(process.cwd(), binName),
+        path.join(__dirname, binName),
+        path.join(__dirname, '..', 'VerScript', binName),
+        path.join(__dirname, '..', 'polyserver', binName)
+    ];
+
+    for (const cand of candidates) {
+        if (fs.existsSync(cand)) return cand;
     }
-    return false;
+    return null;
 }
-function replaceOutsideString(line, searchStr, replaceStr, requireWordBoundary = false) {
-    let inString = false;
-    for (let i = 0; i <= line.length - searchStr.length; i++) {
-        if (line[i] === '"') {
-            inString = !inString;
-        } else if (!inString && line[i] === '!') {
-            break;
-        } else if (!inString && line.substring(i, i + searchStr.length) === searchStr) {
-            if (requireWordBoundary) {
-                const prevChar = i > 0 ? line[i - 1] : '';
-                const nextChar = i + searchStr.length < line.length ? line[i + searchStr.length] : '';
-                const isWordChar = (char) => /[a-zA-Z0-9_]/.test(char);
-                if (!isWordChar(prevChar) && !isWordChar(nextChar)) {
-                    return line.substring(0, i) + replaceStr + line.substring(i + searchStr.length);
-                }
-            } else {
-                return line.substring(0, i) + replaceStr + line.substring(i + searchStr.length);
-            }
-        }
-    }
-    return line;
-}
-// --- SMART CODE FIX ---
-// Analyzes user code and fixes common VerScript errors
-function fixVerScriptCode(code) {
-    if (!code || !code.trim()) return null;
-    
-    const lines = code.split('\n');
-    const fixed = lines.map(line => {
-        let trimmed = line.trim();
-        if (!trimmed || hasInlineComment(trimmed) === 0) return line;
 
-        let commentIdx = hasInlineComment(trimmed);
-        let codePart = commentIdx !== -1 ? trimmed.substring(0, commentIdx).trim() : trimmed;
-        
-        // 1. Fix missing space after display
-        if (/^display[^a-zA-Z0-9_\s]/.test(codePart)) {
-            line = replaceOutsideString(line, 'display', 'display ', true);
-            trimmed = line.trim();
-            commentIdx = hasInlineComment(trimmed);
-            codePart = commentIdx !== -1 ? trimmed.substring(0, commentIdx).trim() : trimmed;
-        }
-        
-        // 2. Fix unclosed strings in display
-        if (/^display\b/.test(codePart) && (codePart.match(/"/g) || []).length % 2 !== 0) {
-            line = line + '"';
-            trimmed = line.trim();
+// --- MOUNT ROUTES FOR EXPRESS / POLYSERVER ---
+function mountRoutes(app, prefix = '') {
+    // 1. Status Endpoint
+    app.get(prefix + '/status', (req, res) => {
+        let loadedConfig = DEFAULT_CONFIG;
+        let epoch = 0;
+        let loss = 0;
+        let accuracy = 0;
+
+        if (fs.existsSync(WEIGHTS_FILE)) {
+            try {
+                const w = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
+                if (w.config) loadedConfig = { ...DEFAULT_CONFIG, ...w.config };
+                if (w.epoch !== undefined) epoch = w.epoch;
+                if (w.loss !== undefined) loss = w.loss;
+                if (w.accuracy !== undefined) accuracy = w.accuracy;
+            } catch (_) {}
         }
 
-        // 3. Fix double equals used for assignment or comparison
-
-        if (includesOutsideString(trimmed, '==')) {
-            let inString = false;
-            let newLine = "";
-            for (let i = 0; i < line.length; i++) {
-                if (line[i] === '"') {
-                    inString = !inString;
-                    newLine += line[i];
-                } else if (!inString && line[i] === '!') {
-                    newLine += line.substring(i);
-                    break;
-                } else if (!inString && line[i] === '=' && line[i+1] === '=') {
-                    newLine += '=';
-                    i++;
-                } else {
-                    newLine += line[i];
-                }
-            }
-            line = newLine;
-            trimmed = line.trim();
-        }
-
-        // 4. Fix assignment with '=' or ':=' instead of ':'
-        const assignmentMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(:=|=)\s*(.*)$/);
-        const hasKeyword = /^(display|prompt|loop|iterate|if|while|until|do|unless|throw|ForceErrors|CriticalErrors|SuppressErrors|else|external|internal|error|step|DataType|extends|it|num|bool|str|arr|entity|set|def|func|method|reply|class|lib|library|Pseudo|Random|temp|inst|del|on|when|emit|async|sync|guard|chan|send|recv|match|with|pipe)\b/.test(trimmed);
-        if (assignmentMatch && !hasKeyword) {
-            const varName = assignmentMatch[1];
-            const varVal = assignmentMatch[3];
-            const indent = line.substring(0, line.indexOf(trimmed));
-            line = `${indent}${varName} : ${varVal}`;
-        }
-        
-        return line;
+        res.json({
+            status: 'online',
+            ...loadedConfig,
+            epoch,
+            loss,
+            accuracy,
+            backend: tf.getBackend(),
+            weightsLoaded: fs.existsSync(WEIGHTS_FILE)
+        });
     });
-    
-    return fixed.join('\n');
-}
 
-function addCommentsToCode(code) {
-    if (!code) return "";
-    const lines = code.split('\n');
-    return lines.map(line => {
-        let trimmed = line.trim();
-        if (!trimmed || hasInlineComment(trimmed) === 0) return line;
+    // 2. Chat API — ALWAYS RETURNS PURE GENERATED NEURAL ANSWER
+    app.post(prefix + '/api/chat', (req, res) => {
+        const { message, code } = req.body;
 
-        const commentIdx = hasInlineComment(trimmed);
-        if (commentIdx !== -1) return line; // already commented
-        
-        let comment = "";
-        if (/^display\b/.test(trimmed)) {
-            comment = "Output to stdout";
-        } else if (/^prompt\b/.test(trimmed)) {
-            comment = "Read user input";
-        } else if (/^loop\b/.test(trimmed)) {
-            comment = includesOutsideString(trimmed, 'step', true) ? "Loop block execution with step constraint" : "Loop block execution";
-        } else if (/^iterate\b/.test(trimmed)) {
-            comment = includesOutsideString(trimmed, 'step', true) ? "Iterate loop variable with step constraint" : "Iterate loop variable";
-        } else if (/^if\b/.test(trimmed)) {
-            comment = "Conditional guard";
-        } else if (/^while\b/.test(trimmed)) {
-            comment = "While loop guard";
-        } else if (/^until\b/.test(trimmed)) {
-            comment = "Until loop guard";
-        } else if (/^do\b/.test(trimmed)) {
-            comment = "Start try block";
-        } else if (/^unless\b/.test(trimmed)) {
-            comment = "Error/condition catch guard";
-        } else if (/^throw\b/.test(trimmed)) {
-            comment = "Throw exception";
-        } else if (/^SuppressErrors\b/.test(trimmed)) {
-            comment = "Enter error suppression scope";
-        } else if (/^CriticalErrors\b/.test(trimmed)) {
-            comment = "Enter critical error filter scope";
-        } else if (/^ForceErrors\b/.test(trimmed)) {
-            comment = "Enter force error scope";
-        } else if (/^DataType\b/.test(trimmed)) {
-            comment = "Custom datatype definition";
-        } else if (/^(num|bool|str|arr|entity)\b/.test(trimmed)) {
-            comment = "Type-constrained variable declaration";
-        } else if (/^(Pseudo|Random)\b/.test(trimmed)) {
-            comment = "Native PRNG engine execution";
-        } else {
-            let hasAssign = false;
-            let inString = false;
-            for (let i = 0; i < trimmed.length; i++) {
-                if (trimmed[i] === '"') {
-                    inString = !inString;
-                } else if (!inString && trimmed[i] === ':') {
-                    hasAssign = true;
-                    break;
-                }
-            }
-            if (hasAssign) {
-                comment = "Variable assignment";
-            } else {
-                comment = "Execute expression";
-            }
-        }
-        
-        return `${line} ! ${comment}`;
-    }).join('\n');
-}
-
-// --- MOUNT ROUTES ---
-// This is the main export. PolyServer calls this to mount VS-Sharp routes.
-function mountRoutes(app, basePath) {
-    const prefix = basePath || '';
-    
-    // --- VERSCRIPT CODE RUNNER ---
-    const srcBin = path.join(process.cwd(), 'verscript_src', 'verscript');
-    const rootBin = path.join(process.cwd(), 'verscript');
-    const localBin = path.join(__dirname, 'verscript');
-    const VERSCRIPT_BIN = fs.existsSync(srcBin) ? srcBin : (fs.existsSync(rootBin) ? rootBin : localBin);
-
-    app.post(prefix + '/run', async (req, res) => {
-        const { code } = req.body;
-        if (typeof code !== 'string') {
-            return res.status(400).json({ error: 'code (string) is required' });
+        if (!message) {
+            return res.status(400).json({ error: 'Message is required' });
         }
 
-        const tmpFile = path.join(os.tmpdir(), `vs_${Date.now()}_${Math.random().toString(36).slice(2)}.vrs`);
+        console.log(`[VS#-15M] Input received: "${message}"`);
+
+        // Check if weights file exists
+        if (!fs.existsSync(WEIGHTS_FILE)) {
+            return res.json({
+                response: "VS#-15M model weights are currently initializing or training. Please run 'node train.js' to start learning.",
+                action: null
+            });
+        }
+
         try {
-            fs.writeFileSync(tmpFile, code, 'utf8');
+            const weightsData = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
+
+            // ALWAYS generate dynamically using the neural language model
+            // No hardcoded or pre-written answers are allowed
+            const responseText = generateLLMResponse(message, weightsData);
+
+            // Extract code block for IDE integration if model generated code
+            const codeBlock = extractCodeBlock(responseText);
+            let actionPayload = null;
+            if (codeBlock) {
+                actionPayload = {
+                    type: "edit",
+                    code: codeBlock
+                };
+            }
+
+            res.json({
+                response: responseText,
+                action: actionPayload
+            });
+
         } catch (err) {
-            return res.status(500).json({ error: 'Failed to write temp file', detail: err.message });
+            console.error("[VS#-15M] Error generating response:", err);
+            res.status(500).json({ error: 'Internal server error running 15M LLM: ' + err.message });
+        }
+    });
+
+    // 3. VerScript Code Runner Endpoint
+    app.post(prefix + '/run', (req, res) => {
+        const { code } = req.body;
+
+        if (typeof code !== 'string') {
+            return res.status(400).json({ error: 'Code string is required.' });
         }
 
-        if (!fs.existsSync(VERSCRIPT_BIN)) {
-            try { fs.unlinkSync(tmpFile); } catch(_) {}
+        const bin = resolveVerScriptBinary();
+        if (!bin) {
             return res.status(500).json({ error: 'VerScript binary not found on server.' });
         }
 
-        // Ensure binary is executable
-        try { fs.chmodSync(VERSCRIPT_BIN, 0o755); } catch(_) {}
+        try { fs.chmodSync(bin, 0o755); } catch (_) {}
 
-        execFile(VERSCRIPT_BIN, [tmpFile], { timeout: 10000, cwd: path.dirname(VERSCRIPT_BIN) }, (error, stdout, stderr) => {
+        const tmpFile = path.join(os.tmpdir(), `vrs_${Date.now()}_${Math.random().toString(36).substring(7)}.vrs`);
+        fs.writeFileSync(tmpFile, code, 'utf8');
+
+        execFile(bin, [tmpFile], { timeout: 10000, cwd: path.dirname(bin) }, (error, stdout, stderr) => {
             try { fs.unlinkSync(tmpFile); } catch (_) {}
 
             if (error && error.killed) {
@@ -516,127 +320,14 @@ function mountRoutes(app, basePath) {
             });
         });
     });
-
-    // --- VS#-1B STATUS ENDPOINT ---
-    app.get(prefix + '/status', (req, res) => {
-        res.json({
-            status: 'online',
-            ...MODEL_CONFIG
-        });
-    });
-
-    // --- VS# CHAT API ---
-    app.post(prefix + '/api/chat', (req, res) => {
-        const { code, message } = req.body;
-        
-        if (!message) {
-            return res.status(400).json({ error: 'Message is required' });
-        }
-
-        console.log(`[VS#-1B] Received: "${message}"`);
-
-        // Load weights dynamically
-        if (!fs.existsSync(WEIGHTS_FILE)) {
-            return res.json({
-                response: "### VS#-1B Language Model Initializing (1B Parameters)\n\nI am currently initializing my 1-Billion parameter custom neural network architecture. Please try again in a moment!",
-                action: null
-            });
-        }
-
-        try {
-            const weightsDataRaw = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
-            const w = weightsDataRaw.weights;
-
-            const getArray = (val) => Array.isArray(val) ? val : Object.values(val);
-
-            let parsedW1;
-            if (Array.isArray(w.W1) && Array.isArray(w.W1[0])) {
-                parsedW1 = w.W1.map(arr => new Float32Array(arr));
-            } else {
-                const flatW1 = getArray(w.W1);
-                const chunkSize = EMBED_DIM * HIDDEN_SIZE;
-                parsedW1 = new Array(CONTEXT_WINDOW);
-                for (let c = 0; c < CONTEXT_WINDOW; c++) {
-                    parsedW1[c] = new Float32Array(flatW1.slice(c * chunkSize, (c + 1) * chunkSize));
-                }
-            }
-
-            const weightsData = {
-                vocab: weightsDataRaw.vocab,
-                weights: {
-                    E: new Float32Array(getArray(w.E)),
-                    W1: parsedW1,
-                    b1: new Float32Array(getArray(w.b1)),
-                    W2: new Float32Array(getArray(w.W2)),
-                    b2: new Float32Array(getArray(w.b2))
-                }
-            };
-
-            let responseText = generateLLMResponse(message, weightsData);
-
-            // --- ENHANCED CODE-WRITING LOGIC ---
-            const lowerMsg = message.toLowerCase();
-            let actionPayload = null;
-            
-            if (lowerMsg.includes("add description comments") || lowerMsg.includes("add comments")) {
-                const commented = addCommentsToCode(code || "");
-                responseText = "### VS# AI Code Annotator\n\nI have added line-by-line description comments explaining each instruction in your code:";
-                actionPayload = {
-                    type: "edit",
-                    code: commented
-                };
-            }
-            else if (lowerMsg.includes("remove errors") || lowerMsg.includes("remove syntax errors") || lowerMsg.includes("fix syntax errors")) {
-                const fixedCode = fixVerScriptCode(code || "");
-                responseText = "### VS# AI Syntax Repair\n\nI scanned the code and repaired assignment operators, unclosed strings, and comparison formats to match VerScript standards:";
-                actionPayload = {
-                    type: "edit",
-                    code: fixedCode
-                };
-            }
-            else {
-                // Detect "fix" / "correct" / "debug" intent — analyze and fix user's code
-                const isFixIntent = /\b(fix|correct|debug|repair|syntax)\b/.test(lowerMsg);
-                if (isFixIntent && code && code.trim()) {
-                    const fixedCode = fixVerScriptCode(code);
-                    if (fixedCode && fixedCode !== code) {
-                        // Append the fixed code block to the LLM response
-                        responseText += "\n\n```verscript\n" + fixedCode + "\n```";
-                    }
-                }
-                
-                // Extract code block from response and set edit action
-                const codeBlock = extractCodeBlock(responseText);
-                if (codeBlock) {
-                    actionPayload = {
-                        type: "edit",
-                        code: codeBlock
-                    };
-                }
-            }
-
-            // Simulate typing delay
-            setTimeout(() => {
-                res.json({
-                    response: responseText,
-                    action: actionPayload
-                });
-            }, 400);
-
-        } catch (err) {
-            console.error("[VS#] Error generating response:", err);
-            res.status(500).json({ error: 'Internal server error running custom LLM.' });
-        }
-    });
 }
-
-module.exports = { mountRoutes };
 
 // --- STANDALONE SERVER ---
 if (require.main === module) {
     const express = require('express');
     const cors = require('cors');
     const app = express();
+
     app.use(cors());
     app.use(express.json());
 
@@ -644,6 +335,8 @@ if (require.main === module) {
 
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
-        console.log(`[VS#] Standalone server running on port ${PORT}`);
+        console.log(`[VS#-15M] Server running on port ${PORT}`);
     });
 }
+
+module.exports = { mountRoutes, generateLLMResponse, forwardTF, tokenize, DEFAULT_CONFIG };

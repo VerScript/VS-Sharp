@@ -1,38 +1,25 @@
+// train.js — VS#-15M Deep Neural Language Model Trainer
+// Trains a 15,000,000 parameter neural network on VerScript & Polyglot Injection Languages (Python, JS, C, etc.)
+
 const fs = require('fs');
 const path = require('path');
-const tf = require('@tensorflow/tfjs-node');
 
-// --- VS#-1B MODEL ARCHITECTURE CONFIGURATION (1 BILLION PARAMETERS) ---
-const MODEL_CONFIG = {
-    modelName: "VS#-1B",
-    parameterCount: 1000000000, // 1,000,000,000 Parameters
-    parameterDisplay: "1.0 Billion (1B)",
-    vocabSize: 32000,
-    contextWindow: 4096,
-    embedDim: 2048,
-    hiddenSize: 4096,
-    numLayers: 24,
-    numHeads: 32,
-    quantization: "INT8/FP16 Mixed Precision"
-};
-
-function calculateModelParameters(config = MODEL_CONFIG) {
-    const embedParams = config.vocabSize * config.embedDim;
-    const layerParams = config.numLayers * (
-        4 * (config.embedDim * config.hiddenSize) + 
-        (config.hiddenSize * config.hiddenSize)
-    );
-    const lmHeadParams = config.hiddenSize * config.vocabSize;
-    const calculated = embedParams + layerParams + lmHeadParams;
-    return Math.max(calculated, config.parameterCount);
+let tf;
+try {
+    tf = require('@tensorflow/tfjs-node');
+} catch (_) {
+    tf = require('@tensorflow/tfjs');
 }
 
-// --- LLM HYPERPARAMETERS ---
-const EMBED_DIM = 2048;
-const CONTEXT_WINDOW = 112;
-const HIDDEN_SIZE = 4096;
-const LEARNING_RATE = 0.02;
-const SAVE_INTERVAL_EPOCHS = 10;
+// --- ARCHITECTURE CONSTANTS (TARGET: 15 MILLION PARAMETERS) ---
+const TARGET_PARAMS = 15000000;
+const CONTEXT_WINDOW = 48;
+const EMBED_DIM = 256;
+const HIDDEN_SIZE_2 = 512;
+const LEARNING_RATE = 0.002;
+const BATCH_SIZE = 64;
+const DEFAULT_EPOCHS = 100;
+
 const DATA_FILE = path.join(__dirname, 'knowledge', 'training_data.json');
 const WEIGHTS_FILE = path.join(__dirname, 'model_weights.json');
 const STOP_FILE = path.join(__dirname, 'stop_training.txt');
@@ -40,7 +27,7 @@ const STOP_FILE = path.join(__dirname, 'stop_training.txt');
 // --- TOKENIZER ---
 function tokenize(text) {
     const tokens = [];
-    const regex = /(\r?\n|\w+|[^\w\s])/g;
+    const regex = /(\r?\n|[a-zA-Z0-9_]+|[^\s\w])/g;
     let match;
     while ((match = regex.exec(text)) !== null) {
         let t = match[0];
@@ -53,197 +40,59 @@ function tokenize(text) {
     return tokens;
 }
 
+// --- DYNAMIC PARAMETER TARGETING ---
+// Calculates H1 such that total model parameters == TARGET_PARAMS (15M)
+function calculateHiddenSize(vocabSize) {
+    const numerator = TARGET_PARAMS - vocabSize * (EMBED_DIM + HIDDEN_SIZE_2 + 1) - HIDDEN_SIZE_2;
+    const denominator = CONTEXT_WINDOW * EMBED_DIM + 1 + HIDDEN_SIZE_2;
+    return Math.max(64, Math.round(numerator / denominator));
+}
 
-// --- TENSORFLOW MODEL SETUP ---
-function buildModel(vocabSize) {
+// --- BUILD 15M PARAMETER NEURAL MODEL ---
+function buildModel(vocabSize, hiddenSize1) {
     const model = tf.sequential();
-    // Embedding layer: [batch_size, CONTEXT_WINDOW] -> [batch_size, CONTEXT_WINDOW, EMBED_DIM]
+
+    // 1. Embedding Layer: [batch, CONTEXT_WINDOW] -> [batch, CONTEXT_WINDOW, EMBED_DIM]
     model.add(tf.layers.embedding({
         inputDim: vocabSize,
         outputDim: EMBED_DIM,
         inputLength: CONTEXT_WINDOW
     }));
 
-    // Flatten to [batch_size, CONTEXT_WINDOW * EMBED_DIM]
+    // 2. Flatten: [batch, CONTEXT_WINDOW * EMBED_DIM]
     model.add(tf.layers.flatten());
 
-    // Dense Hidden Layer (tanh)
+    // 3. Dense Hidden Layer 1: [batch, H1]
     model.add(tf.layers.dense({
-        units: HIDDEN_SIZE,
+        units: hiddenSize1,
         activation: 'tanh',
         useBias: true
     }));
 
-    // Output Logits Layer
+    // 4. Dense Hidden Layer 2: [batch, H2]
+    model.add(tf.layers.dense({
+        units: HIDDEN_SIZE_2,
+        activation: 'tanh',
+        useBias: true
+    }));
+
+    // 5. Output Logits: [batch, vocabSize]
     model.add(tf.layers.dense({
         units: vocabSize,
         useBias: true
     }));
 
     model.compile({
-        optimizer: tf.train.sgd(LEARNING_RATE),
-        loss: 'sparseCategoricalCrossentropy'
+        optimizer: tf.train.adam(LEARNING_RATE),
+        loss: 'sparseCategoricalCrossentropy',
+        metrics: ['accuracy']
     });
 
     return model;
 }
 
-// Helper to manually extract weights for saving in the format expected by server.js
-async function extractWeights(model) {
-    const E = await model.layers[0].getWeights()[0].data();
-    const w1Tensor = model.layers[2].getWeights()[0];
-    const b1 = await model.layers[2].getWeights()[1].data();
-    const W2 = await model.layers[3].getWeights()[0].data();
-    const b2 = await model.layers[3].getWeights()[1].data();
-
-    const parsedW1 = new Array(CONTEXT_WINDOW);
-    const chunkSize = w1Tensor.shape[0] / CONTEXT_WINDOW;
-    for (let c = 0; c < CONTEXT_WINDOW; c++) {
-        const chunk = tf.slice(w1Tensor, [c * chunkSize, 0], [chunkSize, w1Tensor.shape[1]]);
-        parsedW1[c] = await chunk.data();
-        tf.dispose(chunk);
-    }
-
-    return {
-        E: E,
-        W1: parsedW1,
-        b1: b1,
-        W2: W2,
-        b2: b2
-    };
-}
-
-
-
-const https = require('https');
-
-function fetchUrl(url) {
-    return new Promise((resolve, reject) => {
-        https.get(url, { headers: { 'User-Agent': 'Node.js' } }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => resolve(data));
-        }).on('error', reject);
-    });
-}
-
-async function augmentTrainingData() {
-    let rawData = [];
-    if (fs.existsSync(DATA_FILE)) {
-        rawData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    }
-
-    try {
-        console.log("Fetching data from VerScript repos...");
-
-        const existingPrompts = new Set(rawData.map(d => d.prompt));
-
-        const codeSample = await fetchUrl('https://raw.githubusercontent.com/VerScript/VerScript/main/README.md');
-        if (codeSample && codeSample.length > 0 && !codeSample.includes('404: Not Found')) {
-            const codePrompt = "What is VerScript based on its README?";
-            if (!existingPrompts.has(codePrompt)) {
-                rawData.push({
-                    prompt: codePrompt,
-                    response: "### VerScript README\n\n" + codeSample.substring(0, 500)
-                });
-            }
-        }
-
-        const docsSample = await fetchUrl('https://raw.githubusercontent.com/VerScript/VerScript.github.io/main/index.html');
-        if (docsSample && docsSample.length > 0 && !docsSample.includes('404: Not Found')) {
-            const docsPrompt = "Show me the main docs page for VerScript";
-            if (!existingPrompts.has(docsPrompt)) {
-                rawData.push({
-                    prompt: docsPrompt,
-                    response: "### VerScript Documentation\n\n" + docsSample.substring(0, 500)
-                });
-            }
-        }
-
-
-        const ideSample = await fetchUrl('https://raw.githubusercontent.com/VerScript/IDE/main/README.md');
-        if (ideSample && ideSample.length > 0 && !ideSample.includes('404: Not Found')) {
-            const idePrompt = "Explain the IDE architecture or provide a prompt for it";
-            if (!existingPrompts.has(idePrompt)) {
-                rawData.push({
-                    prompt: idePrompt,
-                    response: "### VerScript Web IDE\n\nThe Web IDE for VerScript allows users to write and test VerScript directly in the browser. It communicates with backend execution servers (like VS-Sharp and PolyServer).\n\nIf you need a prompt for the IDE section: \"Create a modern, dark-themed Web IDE interface for VerScript with syntax highlighting, an output console, and a connection to the PolyServer runner API.\"\n\nCode snippet context:\n```javascript\n### VerScript Web IDE\nThe Web IDE for VerScript...\n```"
-                });
-            }
-        }
-
-
-        const cArchSample = await fetchUrl('https://raw.githubusercontent.com/VerScript/VerScript/main/src/main.c');
-        if (cArchSample && cArchSample.length > 0 && !cArchSample.includes('404: Not Found')) {
-            const cArchPrompt = "What does the VerScript C architecture look like?";
-            if (!existingPrompts.has(cArchPrompt)) {
-                rawData.push({
-                    prompt: cArchPrompt,
-                    response: "### VerScript Core Architecture\n\nThe core of VerScript is written in C. It includes parsers, tokenizers, and interpreters for language statements like display, prompt, loop, and if. Here is a brief look at the C source:\n\n```c\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <ctype.h>\n#include <stdarg.h>\n#include <setjmp.h>\n#include \"../include/opcodes.h\"\n#include \"../include/lexer.h\"\n\ntypedef enum { VAR_INT, VAR_STRING, VAR_BOOL } VarType;\n\ntypedef struct {\n    char *name;\n    VarType type;\n    int int_val;\n    char *string_val;\n} Variable;\n\nVariable *symtable = NULL;\nint var_count = 0;\nint var_capacity = 0;\n\n#define MAX_JMP_STACK 64\njmp_buf jmp_env_stack[MAX_JMP_STACK];\nint jmp_stack_ptr = 0;\n\n#de...\n```"
-                });
-            }
-        }
-
-        const otherLangs = [
-            {
-                prompt: "Write a python script to calculate factorial",
-                response: "```python\ndef factorial(n):\n    if n == 0:\n        return 1\n    return n * factorial(n-1)\n```"
-            },
-            {
-                prompt: "Write a JS function for binary search",
-                response: "```javascript\nfunction binarySearch(arr, target) {\n    let left = 0, right = arr.length - 1;\n    while (left <= right) {\n        let mid = Math.floor((left + right) / 2);\n        if (arr[mid] === target) return mid;\n        else if (arr[mid] < target) left = mid + 1;\n        else right = mid - 1;\n    }\n    return -1;\n}\n```"
-            },
-            {
-                prompt: "Create a simple C++ program to print Hello World",
-                response: "```cpp\n#include <iostream>\n\nint main() {\n    std::cout << \"Hello, World!\" << std::endl;\n    return 0;\n}\n```"
-            }
-        ];
-
-        for (const langPair of otherLangs) {
-            if (!existingPrompts.has(langPair.prompt)) {
-                rawData.push(langPair);
-            }
-        }
-
-        fs.writeFileSync(DATA_FILE, JSON.stringify(rawData, null, 4));
-        console.log("Updated training_data.json with external sources and multi-language support.");
-    } catch (e) {
-        console.error("Error fetching data:", e);
-    }
-}
-
-// --- MAIN TRAINING WORKER ---
-async function startTraining() {
-    await augmentTrainingData();
-
-    if (!fs.existsSync(DATA_FILE)) {
-        console.error(`Error: Training data not found at ${DATA_FILE}`);
-        process.exit(1);
-    }
-
-    console.log("Loading training data...");
-    const rawData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-
-    const corpusTokens = [];
-    const trainingPairs = [];
-
-    rawData.forEach(pair => {
-        const pTokens = tokenize(pair.prompt);
-        const rTokens = tokenize(pair.response);
-        
-        for (let token of pTokens) { corpusTokens.push(token); }
-        for (let token of rTokens) { corpusTokens.push(token); }
-        trainingPairs.push({ pTokens, rTokens });
-    });
-
-    const uniqueTokens = new Set(corpusTokens);
-    const specialTokens = ['<pad>', '<unk>', '<start>', '<end>', '<sep>'];
-    specialTokens.forEach(t => uniqueTokens.add(t));
-    const vocab = Array.from(uniqueTokens);
-    const vocabMap = new Map(vocab.map((t, idx) => [t, idx]));
-
-    console.log(`Vocabulary built. Size: ${vocab.length} unique tokens.`);
-
+// --- GENERATE SAMPLE TEST OUTPUT ---
+function testGeneration(model, vocab, vocabMap, promptText) {
     const padIdx = vocabMap.get('<pad>');
     const startIdx = vocabMap.get('<start>');
     const sepIdx = vocabMap.get('<sep>');
@@ -252,191 +101,259 @@ async function startTraining() {
 
     const getIdx = t => vocabMap.has(t) ? vocabMap.get(t) : unkIdx;
 
-    const dataset = [];
-    trainingPairs.forEach(pair => {
-        const sequence = [startIdx];
-        for (let token of pair.pTokens) { sequence.push(getIdx(token)); }
-        sequence.push(sepIdx);
-        for (let token of pair.rTokens) { sequence.push(getIdx(token)); }
-        sequence.push(endIdx);
+    const promptTokens = tokenize(promptText);
+    const seq = [startIdx];
+    for (let t of promptTokens) seq.push(getIdx(t));
+    seq.push(sepIdx);
 
-        for (let i = 0; i < sequence.length; i++) {
-            const context = [];
-            for (let c = CONTEXT_WINDOW; c >= 1; c--) {
-                const seqIdx = i - c;
-                if (seqIdx < 0) {
-                    context.push(padIdx);
-                } else {
-                    context.push(sequence[seqIdx]);
-                }
-            }
-            const target = sequence[i];
-            dataset.push({ context, target });
+    const generated = [];
+    const maxLen = 40;
+
+    for (let step = 0; step < maxLen; step++) {
+        const ctx = [];
+        for (let c = CONTEXT_WINDOW; c >= 1; c--) {
+            const idx = seq.length - c;
+            ctx.push(idx < 0 ? padIdx : seq[idx]);
         }
-    });
 
-    console.log(`Dataset generated with ${dataset.length} training examples.`);
+        const inputTensor = tf.tensor2d([ctx], [1, CONTEXT_WINDOW], 'int32');
+        const logits = model.predict(inputTensor);
+        const probs = tf.softmax(logits).squeeze().arraySync();
+        inputTensor.dispose();
+        logits.dispose();
 
-    let model = buildModel(vocab.length);
-    let startEpoch = 0;
+        // Sample with temperature
+        const temp = 0.8;
+        const logProbs = probs.map(p => Math.log(p + 1e-10) / temp);
+        const maxLog = Math.max(...logProbs);
+        const exps = logProbs.map(lp => Math.exp(lp - maxLog));
+        const sumExp = exps.reduce((a, b) => a + b, 0);
+        const softProbs = exps.map(e => e / (sumExp || 1e-10));
 
-    if (fs.existsSync(WEIGHTS_FILE)) {
-        console.log(`Existing model weights found at ${WEIGHTS_FILE}. Loading...`);
-        try {
-            const savedData = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
-            if (JSON.stringify(savedData.vocab) === JSON.stringify(vocab)) {
-                const w = savedData.weights;
-
-                const getArray = (val) => Array.isArray(val) ? val : Object.values(val);
-
-                const E_tensor = tf.tensor2d(getArray(w.E), [vocab.length, EMBED_DIM]);
-
-                let W1_raw;
-                if (Array.isArray(w.W1) && Array.isArray(w.W1[0])) {
-                    W1_raw = w.W1;
-                } else {
-                    const tmpFlatW1 = getArray(w.W1);
-                    const chunkSize = EMBED_DIM * HIDDEN_SIZE;
-                    W1_raw = new Array(CONTEXT_WINDOW);
-                    for (let c = 0; c < CONTEXT_WINDOW; c++) {
-                        W1_raw[c] = tmpFlatW1.slice(c * chunkSize, (c + 1) * chunkSize);
-                    }
-                }
-
-                const w1Tensors = [];
-                for(let c=0; c<CONTEXT_WINDOW; c++) {
-                    w1Tensors.push(tf.tensor2d(W1_raw[c], [EMBED_DIM, HIDDEN_SIZE]));
-                }
-                const W1_tensor = tf.concat(w1Tensors, 0);
-
-                const b1_tensor = tf.tensor1d(getArray(w.b1));
-                const W2_tensor = tf.tensor2d(getArray(w.W2), [HIDDEN_SIZE, vocab.length]);
-                const b2_tensor = tf.tensor1d(getArray(w.b2));
-
-                model.layers[0].setWeights([E_tensor]);
-                model.layers[2].setWeights([W1_tensor, b1_tensor]);
-                model.layers[3].setWeights([W2_tensor, b2_tensor]);
-
-                tf.dispose([E_tensor, W1_tensor, b1_tensor, W2_tensor, b2_tensor, w1Tensors]);
-
-                startEpoch = savedData.epoch || 0;
-                console.log(`Resuming training from epoch ${startEpoch}...`);
-            } else {
-                console.log("Vocabulary changed. Re-initializing weights.");
+        let nextIdx = endIdx;
+        let cum = 0;
+        const r = Math.random();
+        for (let i = 0; i < softProbs.length; i++) {
+            cum += softProbs[i];
+            if (r <= cum) {
+                nextIdx = i;
+                break;
             }
-        } catch (e) {
-            console.warn("Failed to load weights file, initializing random weights:", e);
+        }
+
+        if (nextIdx === endIdx) break;
+        seq.push(nextIdx);
+        generated.push(vocab[nextIdx]);
+    }
+
+    return generated.join(' ').replace(/ \n /g, '\n').replace(/ \n/g, '\n').replace(/\n /g, '\n');
+}
+
+// --- SAVE MODEL WEIGHTS ---
+function saveWeightsCheckpoint(model, vocab, config, epoch, loss, accuracy) {
+    const layers = model.layers;
+    const E = layers[0].getWeights()[0].arraySync();
+    const W1 = layers[2].getWeights()[0].arraySync();
+    const b1 = layers[2].getWeights()[1].arraySync();
+    const W2 = layers[3].getWeights()[0].arraySync();
+    const b2 = layers[3].getWeights()[1].arraySync();
+    const W3 = layers[4].getWeights()[0].arraySync();
+    const b3 = layers[4].getWeights()[1].arraySync();
+
+    const data = {
+        vocab,
+        config,
+        weights: { E, W1, b1, W2, b2, W3, b3 },
+        epoch,
+        loss,
+        accuracy,
+        updatedAt: new Date().toISOString()
+    };
+
+    fs.writeFileSync(WEIGHTS_FILE, JSON.stringify(data), 'utf8');
+    console.log(`[Checkpoint] Saved epoch ${epoch} weights (${config.parameterDisplay}) to model_weights.json`);
+}
+
+// --- MAIN TRAINING LOOP ---
+async function main() {
+    console.log("==================================================================");
+    console.log("🚀 VS#-15M Neural Language Model & Polyglot Trainer (15M Params)");
+    console.log("==================================================================");
+
+    // 1. Clear model epochs / stale state
+    if (fs.existsSync(WEIGHTS_FILE)) {
+        console.log("[Setup] Clearing previous model weights and resetting epochs to 0...");
+        fs.unlinkSync(WEIGHTS_FILE);
+    }
+    if (fs.existsSync(STOP_FILE)) {
+        fs.unlinkSync(STOP_FILE);
+    }
+
+    // 2. Load Training Dataset
+    if (!fs.existsSync(DATA_FILE)) {
+        console.log("[Setup] Training dataset not found. Running build_dataset.js first...");
+        require('./build_dataset');
+    }
+
+    const rawData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    console.log(`[Dataset] Loaded ${rawData.length} prompt-response pairs from ${DATA_FILE}`);
+
+    // 3. Build Vocabulary
+    const specialTokens = ['<pad>', '<start>', '<sep>', '<end>', '<unk>'];
+    const tokenCounts = new Map();
+    for (let pair of rawData) {
+        const pToks = tokenize(pair.prompt);
+        const rToks = tokenize(pair.response);
+        for (let t of pToks) tokenCounts.set(t, (tokenCounts.get(t) || 0) + 1);
+        for (let t of rToks) tokenCounts.set(t, (tokenCounts.get(t) || 0) + 1);
+    }
+
+    // Sort tokens by frequency
+    const sortedTokens = Array.from(tokenCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(e => e[0]);
+
+    const vocab = [...specialTokens, ...sortedTokens];
+    const vocabMap = new Map(vocab.map((t, idx) => [t, idx]));
+    const vocabSize = vocab.length;
+
+    console.log(`[Vocab] Built vocabulary of ${vocabSize} unique tokens.`);
+
+    // 4. Compute 15M Model Dimensions
+    const hiddenSize1 = calculateHiddenSize(vocabSize);
+    const model = buildModel(vocabSize, hiddenSize1);
+    const actualParams = model.countParams();
+
+    const config = {
+        modelName: "VS#-15M",
+        parameterCount: actualParams,
+        parameterDisplay: (actualParams / 1000000).toFixed(2) + " Million (" + Math.round(actualParams / 1000000) + "M)",
+        architecture: "VS#-15M Deep Feed-Forward Polyglot Syntax Engine",
+        vocabSize: vocabSize,
+        contextWindow: CONTEXT_WINDOW,
+        embedDim: EMBED_DIM,
+        hiddenSize: hiddenSize1,
+        hiddenSize2: HIDDEN_SIZE_2
+    };
+
+    console.log(`[Model] Target Parameters : 15,000,000`);
+    console.log(`[Model] Actual Parameters : ${actualParams.toLocaleString()} (${config.parameterDisplay})`);
+    console.log(`[Model] Context Window    : ${CONTEXT_WINDOW} tokens`);
+    console.log(`[Model] Embedding Dim     : ${EMBED_DIM}`);
+    console.log(`[Model] Hidden Layer 1    : ${hiddenSize1}`);
+    console.log(`[Model] Hidden Layer 2    : ${HIDDEN_SIZE_2}`);
+
+    // 5. Build Training Windows
+    const padIdx = vocabMap.get('<pad>');
+    const startIdx = vocabMap.get('<start>');
+    const sepIdx = vocabMap.get('<sep>');
+    const endIdx = vocabMap.get('<end>');
+    const unkIdx = vocabMap.get('<unk>');
+
+    const getIdx = t => vocabMap.has(t) ? vocabMap.get(t) : unkIdx;
+
+    const allInputs = [];
+    const allTargets = [];
+
+    for (let pair of rawData) {
+        const pToks = tokenize(pair.prompt).map(getIdx);
+        const rToks = tokenize(pair.response).map(getIdx);
+
+        const seq = [startIdx, ...pToks, sepIdx, ...rToks, endIdx];
+
+        // Generate sliding windows
+        const promptLen = pToks.length + 2; // start + prompt + sep
+        for (let i = promptLen; i < seq.length; i++) {
+            const ctx = [];
+            for (let c = CONTEXT_WINDOW; c >= 1; c--) {
+                const pos = i - c;
+                ctx.push(pos < 0 ? padIdx : seq[pos]);
+            }
+            allInputs.push(ctx);
+            allTargets.push(seq[i]);
         }
     }
 
-    console.log("\n=============================================");
-    console.log("   VS-Sharp Generative LLM Training Started  ");
-    console.log(`   Running loop in background...             `);
-    console.log(`   To stop, run PowerShell: .\\stop-training.ps1`);
-    console.log("=============================================\n");
+    console.log(`[Dataset] Generated ${allInputs.length.toLocaleString()} training window samples.`);
 
-    const batchSize = 64;
-    const xs = tf.tensor2d(dataset.map(d => d.context), [dataset.length, CONTEXT_WINDOW], 'int32');
-    // For sparseCategoricalCrossentropy, targets should be 1D float32 to prevent floor error in tfjs
-    const ys = tf.tensor1d(dataset.map(d => d.target), 'float32');
+    // 6. Training Loop
+    const totalSamples = allInputs.length;
+    const epochs = parseInt(process.env.EPOCHS || process.argv[2] || DEFAULT_EPOCHS, 10);
+    console.log(`[Training] Commencing training for ${epochs} epochs (Batch Size: ${BATCH_SIZE})...`);
 
-    let epoch = startEpoch;
-    
-    while(true) {
+    // Initial checkpoint save (epoch 0, randomized initialized weights)
+    saveWeightsCheckpoint(model, vocab, config, 0, 0, 0);
+
+    for (let epoch = 1; epoch <= epochs; epoch++) {
         if (fs.existsSync(STOP_FILE)) {
-            console.log("\n[Stop Signal Detected]");
-            const extractedWeights = await extractWeights(model);
-            saveWeights(extractedWeights, vocab, epoch);
-            try {
-                fs.unlinkSync(STOP_FILE);
-            } catch (err) {}
-            console.log("Training stopped safely. Exiting process.");
-            process.exit(0);
+            console.log(`[Stop] Detected ${STOP_FILE}. Halting training cleanly.`);
+            fs.unlinkSync(STOP_FILE);
+            break;
         }
 
-        const h = await model.fit(xs, ys, {
-            batchSize: batchSize,
+        const t0 = Date.now();
+
+        // Sample a balanced batch or iterate through windows in minibatches
+        // We shuffle indices for stochastic mini-batch training
+        const indices = Array.from({ length: totalSamples }, (_, i) => i);
+        for (let i = indices.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [indices[i], indices[j]] = [indices[j], indices[i]];
+        }
+
+        // Train on subset per epoch for fast iterative feedback or full epoch
+        const maxSamplesPerEpoch = Math.min(totalSamples, 2048);
+        const batchInputs = [];
+        const batchTargets = [];
+
+        for (let k = 0; k < maxSamplesPerEpoch; k++) {
+            const idx = indices[k];
+            batchInputs.push(allInputs[idx]);
+            batchTargets.push(allTargets[idx]);
+        }
+
+        const xTensor = tf.tensor2d(batchInputs, [maxSamplesPerEpoch, CONTEXT_WINDOW], 'int32');
+        const yTensor = tf.tensor1d(batchTargets, 'float32');
+
+        const history = await model.fit(xTensor, yTensor, {
+            batchSize: BATCH_SIZE,
             epochs: 1,
             shuffle: true,
             verbose: 0
         });
 
-        epoch++;
-        const loss = h.history.loss[0];
+        const loss = history.history.loss[0];
+        const acc = history.history.acc ? history.history.acc[0] : 0;
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
 
-        if (epoch % 5 === 0 || epoch === 1) {
-            console.log(`Epoch ${epoch} | Average Cross-Entropy Loss: ${loss.toFixed(6)}`);
+        xTensor.dispose();
+        yTensor.dispose();
+
+        console.log(`Epoch ${epoch}/${epochs} - Loss: ${loss.toFixed(4)} | Acc: ${(acc * 100).toFixed(1)}% | Time: ${elapsed}s`);
+
+        // Save weights checkpoint every 2 epochs or last
+        if (epoch % 2 === 0 || epoch === epochs) {
+            saveWeightsCheckpoint(model, vocab, config, epoch, loss, acc);
         }
 
-        if (epoch % SAVE_INTERVAL_EPOCHS === 0) {
-            const extractedWeights = await extractWeights(model);
-            saveWeights(extractedWeights, vocab, epoch);
+        // Test generation every 5 epochs
+        if (epoch % 5 === 0) {
+            const samplePrompt = "hello";
+            const sampleGen = testGeneration(model, vocab, vocabMap, samplePrompt);
+            console.log(`  Sample Gen ["${samplePrompt}"]: ${sampleGen.slice(0, 80)}...`);
         }
-
-        await new Promise(r => setImmediate(r));
     }
+
+    console.log("==================================================================");
+    console.log("✅ Training Complete! Model weights saved to model_weights.json");
+    console.log("==================================================================");
 }
 
-function saveWeights(weights, vocab, epoch) {
-    let fd;
-    const CHUNK_SIZE = 50000;
-
-    function writeChunked(fd, arr, isLast = true) {
-        for (let i = 0; i < arr.length; i += CHUNK_SIZE) {
-            const chunk = arr.subarray(i, i + CHUNK_SIZE);
-            fs.writeSync(fd, chunk.join(','));
-            if (i + CHUNK_SIZE < arr.length) {
-                fs.writeSync(fd, ',');
-            }
-        }
-        if (!isLast) {
-            fs.writeSync(fd, ',\n');
-        } else {
-            fs.writeSync(fd, '\n');
-        }
-    }
-
-    try {
-        fd = fs.openSync(WEIGHTS_FILE, 'w');
-        fs.writeSync(fd, `{\n  "epoch": ${epoch},\n  "vocab": ${JSON.stringify(vocab)},\n  "weights": {\n`);
-
-        // Write E
-        fs.writeSync(fd, `    "E": [`);
-        writeChunked(fd, weights.E, true);
-        fs.writeSync(fd, `],\n`);
-
-        // Write W1
-        fs.writeSync(fd, `    "W1": [\n`);
-        for (let i = 0; i < weights.W1.length; i++) {
-            fs.writeSync(fd, `      [`);
-            writeChunked(fd, weights.W1[i], true);
-            fs.writeSync(fd, `]${i < weights.W1.length - 1 ? ',' : ''}\n`);
-        }
-        fs.writeSync(fd, `    ],\n`);
-
-        // Write b1
-        fs.writeSync(fd, `    "b1": [`);
-        writeChunked(fd, weights.b1, true);
-        fs.writeSync(fd, `],\n`);
-
-        // Write W2
-        fs.writeSync(fd, `    "W2": [`);
-        writeChunked(fd, weights.W2, true);
-        fs.writeSync(fd, `],\n`);
-
-        // Write b2
-        fs.writeSync(fd, `    "b2": [`);
-        writeChunked(fd, weights.b2, true);
-        fs.writeSync(fd, `]\n  }\n}\n`);
-
-        console.log(`[Weights Saved] Saved checkpoint for epoch ${epoch} to ${WEIGHTS_FILE}`);
-    } catch (e) {
-        console.error("Failed to save weights:", e);
-    } finally {
-        if (typeof fd !== 'undefined') {
-            fs.closeSync(fd);
-        }
-    }
+if (require.main === module) {
+    main().catch(err => {
+        console.error("Training Error:", err);
+        process.exit(1);
+    });
 }
 
-startTraining();
+module.exports = { main, buildModel, calculateHiddenSize, tokenize, TARGET_PARAMS };
