@@ -16,13 +16,15 @@ const TARGET_PARAMS = 15000000;
 const CONTEXT_WINDOW = 48;
 const EMBED_DIM = 256;
 const HIDDEN_SIZE_2 = 512;
-const LEARNING_RATE = 0.002;
-const BATCH_SIZE = 64;
-const DEFAULT_EPOCHS = 100;
+const LEARNING_RATE = 0.003;
+const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || '32', 10);
+const SAMPLES_PER_EPOCH = parseInt(process.env.SAMPLES_PER_EPOCH || '384', 10);
+const DEFAULT_EPOCHS = 50;
 
 const DATA_FILE = path.join(__dirname, 'knowledge', 'training_data.json');
 const WEIGHTS_FILE = path.join(__dirname, 'model_weights.json');
 const STOP_FILE = path.join(__dirname, 'stop_training.txt');
+const EVAL_FILE = path.join(__dirname, 'epoch_eval_history.json');
 
 // --- TOKENIZER ---
 function tokenize(text) {
@@ -41,7 +43,6 @@ function tokenize(text) {
 }
 
 // --- DYNAMIC PARAMETER TARGETING ---
-// Calculates H1 such that total model parameters == TARGET_PARAMS (15M)
 function calculateHiddenSize(vocabSize) {
     const numerator = TARGET_PARAMS - vocabSize * (EMBED_DIM + HIDDEN_SIZE_2 + 1) - HIDDEN_SIZE_2;
     const denominator = CONTEXT_WINDOW * EMBED_DIM + 1 + HIDDEN_SIZE_2;
@@ -92,12 +93,12 @@ function buildModel(vocabSize, hiddenSize1) {
 }
 
 // --- GENERATE SAMPLE TEST OUTPUT ---
-function testGeneration(model, vocab, vocabMap, promptText) {
-    const padIdx = vocabMap.get('<pad>');
-    const startIdx = vocabMap.get('<start>');
-    const sepIdx = vocabMap.get('<sep>');
-    const endIdx = vocabMap.get('<end>');
-    const unkIdx = vocabMap.get('<unk>');
+function testGeneration(model, vocab, vocabMap, promptText, maxTokens = 50) {
+    const padIdx = vocabMap.get('<pad>') ?? 0;
+    const startIdx = vocabMap.get('<start>') ?? 1;
+    const sepIdx = vocabMap.get('<sep>') ?? 2;
+    const endIdx = vocabMap.get('<end>') ?? 3;
+    const unkIdx = vocabMap.get('<unk>') ?? 4;
 
     const getIdx = t => vocabMap.has(t) ? vocabMap.get(t) : unkIdx;
 
@@ -107,9 +108,8 @@ function testGeneration(model, vocab, vocabMap, promptText) {
     seq.push(sepIdx);
 
     const generated = [];
-    const maxLen = 40;
 
-    for (let step = 0; step < maxLen; step++) {
+    for (let step = 0; step < maxTokens; step++) {
         const ctx = [];
         for (let c = CONTEXT_WINDOW; c >= 1; c--) {
             const idx = seq.length - c;
@@ -123,7 +123,7 @@ function testGeneration(model, vocab, vocabMap, promptText) {
         logits.dispose();
 
         // Sample with temperature
-        const temp = 0.8;
+        const temp = 0.75;
         const logProbs = probs.map(p => Math.log(p + 1e-10) / temp);
         const maxLog = Math.max(...logProbs);
         const exps = logProbs.map(lp => Math.exp(lp - maxLog));
@@ -180,16 +180,9 @@ async function main() {
     console.log("🚀 VS#-15M Neural Language Model & Polyglot Trainer (15M Params)");
     console.log("==================================================================");
 
-    // 1. Clear model epochs / stale state
-    if (fs.existsSync(WEIGHTS_FILE)) {
-        console.log("[Setup] Clearing previous model weights and resetting epochs to 0...");
-        fs.unlinkSync(WEIGHTS_FILE);
-    }
-    if (fs.existsSync(STOP_FILE)) {
-        fs.unlinkSync(STOP_FILE);
-    }
+    const isReset = process.argv.includes('--reset');
 
-    // 2. Load Training Dataset
+    // 1. Dataset loading
     if (!fs.existsSync(DATA_FILE)) {
         console.log("[Setup] Training dataset not found. Running build_dataset.js first...");
         require('./build_dataset');
@@ -198,7 +191,7 @@ async function main() {
     const rawData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
     console.log(`[Dataset] Loaded ${rawData.length} prompt-response pairs from ${DATA_FILE}`);
 
-    // 3. Build Vocabulary
+    // 2. Vocabulary
     const specialTokens = ['<pad>', '<start>', '<sep>', '<end>', '<unk>'];
     const tokenCounts = new Map();
     for (let pair of rawData) {
@@ -208,7 +201,6 @@ async function main() {
         for (let t of rToks) tokenCounts.set(t, (tokenCounts.get(t) || 0) + 1);
     }
 
-    // Sort tokens by frequency
     const sortedTokens = Array.from(tokenCounts.entries())
         .sort((a, b) => b[1] - a[1])
         .map(e => e[0]);
@@ -219,7 +211,7 @@ async function main() {
 
     console.log(`[Vocab] Built vocabulary of ${vocabSize} unique tokens.`);
 
-    // 4. Compute 15M Model Dimensions
+    // 3. Model construction
     const hiddenSize1 = calculateHiddenSize(vocabSize);
     const model = buildModel(vocabSize, hiddenSize1);
     const actualParams = model.countParams();
@@ -228,7 +220,7 @@ async function main() {
         modelName: "VS#-15M",
         parameterCount: actualParams,
         parameterDisplay: (actualParams / 1000000).toFixed(2) + " Million (" + Math.round(actualParams / 1000000) + "M)",
-        architecture: "VS#-15M Deep Feed-Forward Polyglot Syntax Engine",
+        architecture: "VS#-15M Deep Neural Language Model & Polyglot Engine",
         vocabSize: vocabSize,
         contextWindow: CONTEXT_WINDOW,
         embedDim: EMBED_DIM,
@@ -239,17 +231,48 @@ async function main() {
     console.log(`[Model] Target Parameters : 15,000,000`);
     console.log(`[Model] Actual Parameters : ${actualParams.toLocaleString()} (${config.parameterDisplay})`);
     console.log(`[Model] Context Window    : ${CONTEXT_WINDOW} tokens`);
-    console.log(`[Model] Embedding Dim     : ${EMBED_DIM}`);
-    console.log(`[Model] Hidden Layer 1    : ${hiddenSize1}`);
-    console.log(`[Model] Hidden Layer 2    : ${HIDDEN_SIZE_2}`);
+    console.log(`[Model] Hidden Layer 1    : ${hiddenSize1} units`);
+    console.log(`[Model] Hidden Layer 2    : ${HIDDEN_SIZE_2} units`);
+    console.log(`[Model] Samples / Epoch   : ${SAMPLES_PER_EPOCH} (Batch Size: ${BATCH_SIZE})`);
 
-    // 5. Build Training Windows
+    // Load existing weights if present and not reset
+    let startingEpoch = 1;
+    if (!isReset && fs.existsSync(WEIGHTS_FILE)) {
+        try {
+            console.log("[Setup] Found existing model_weights.json. Loading trained weights...");
+            const prevData = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
+            if (prevData.epoch) startingEpoch = prevData.epoch + 1;
+            const w = prevData.weights;
+            if (w && w.E && w.W1 && w.b1 && w.W2 && w.b2 && w.W3 && w.b3) {
+                model.layers[0].setWeights([tf.tensor2d(w.E, [vocabSize, EMBED_DIM])]);
+                model.layers[2].setWeights([
+                    tf.tensor2d(w.W1, [CONTEXT_WINDOW * EMBED_DIM, hiddenSize1]),
+                    tf.tensor1d(w.b1)
+                ]);
+                model.layers[3].setWeights([
+                    tf.tensor2d(w.W2, [hiddenSize1, HIDDEN_SIZE_2]),
+                    tf.tensor1d(w.b2)
+                ]);
+                model.layers[4].setWeights([
+                    tf.tensor2d(w.W3, [HIDDEN_SIZE_2, vocabSize]),
+                    tf.tensor1d(w.b3)
+                ]);
+                console.log(`[Setup] Successfully resumed from epoch ${prevData.epoch} (loss: ${prevData.loss || 'N/A'})!`);
+            }
+        } catch (e) {
+            console.log("[Setup] Note: could not resume weights directly (" + e.message + "). Initializing fresh.");
+        }
+    } else {
+        console.log("[Setup] Initializing fresh weights at epoch 0...");
+        saveWeightsCheckpoint(model, vocab, config, 0, 0, 0);
+    }
+
+    // 4. Build Training Windows
     const padIdx = vocabMap.get('<pad>');
     const startIdx = vocabMap.get('<start>');
     const sepIdx = vocabMap.get('<sep>');
     const endIdx = vocabMap.get('<end>');
     const unkIdx = vocabMap.get('<unk>');
-
     const getIdx = t => vocabMap.has(t) ? vocabMap.get(t) : unkIdx;
 
     const allInputs = [];
@@ -258,11 +281,9 @@ async function main() {
     for (let pair of rawData) {
         const pToks = tokenize(pair.prompt).map(getIdx);
         const rToks = tokenize(pair.response).map(getIdx);
-
         const seq = [startIdx, ...pToks, sepIdx, ...rToks, endIdx];
+        const promptLen = pToks.length + 2;
 
-        // Generate sliding windows
-        const promptLen = pToks.length + 2; // start + prompt + sep
         for (let i = promptLen; i < seq.length; i++) {
             const ctx = [];
             for (let c = CONTEXT_WINDOW; c >= 1; c--) {
@@ -274,78 +295,113 @@ async function main() {
         }
     }
 
-    console.log(`[Dataset] Generated ${allInputs.length.toLocaleString()} training window samples.`);
+    console.log(`[Dataset] Total available training sequences: ${allInputs.length.toLocaleString()}`);
 
-    // 6. Training Loop
+    // Evaluation prompts to test after every epoch
+    const evalSuites = [
+        { category: "Conversation", prompt: "hello" },
+        { category: "VerScript", prompt: "write a hello world program in verscript" },
+        { category: "Inject Python", prompt: "how to run python in verscript" },
+        { category: "Inject JS", prompt: "write javascript async fetch function" },
+        { category: "Inject C", prompt: "write c code for binary search" }
+    ];
+
+    // Load or initialize evaluation history
+    let evalHistory = [];
+    if (fs.existsSync(EVAL_FILE)) {
+        try { evalHistory = JSON.parse(fs.readFileSync(EVAL_FILE, 'utf8')); } catch (_) {}
+    }
+
+    // 5. Training Loop
     const totalSamples = allInputs.length;
-    const epochs = parseInt(process.env.EPOCHS || process.argv[2] || DEFAULT_EPOCHS, 10);
-    console.log(`[Training] Commencing training for ${epochs} epochs (Batch Size: ${BATCH_SIZE})...`);
+    const targetEpochs = parseInt(process.env.EPOCHS || process.argv[2] || DEFAULT_EPOCHS, 10);
+    const endEpoch = startingEpoch + targetEpochs - 1;
 
-    // Initial checkpoint save (epoch 0, randomized initialized weights)
-    saveWeightsCheckpoint(model, vocab, config, 0, 0, 0);
+    console.log(`\n[Training] Starting training epochs ${startingEpoch} -> ${endEpoch}...`);
 
-    for (let epoch = 1; epoch <= epochs; epoch++) {
+    for (let epoch = startingEpoch; epoch <= endEpoch; epoch++) {
         if (fs.existsSync(STOP_FILE)) {
             console.log(`[Stop] Detected ${STOP_FILE}. Halting training cleanly.`);
             fs.unlinkSync(STOP_FILE);
             break;
         }
 
+        console.log(`\n------------------------------------------------------------------`);
+        console.log(`>>> Starting Epoch ${epoch} / ${endEpoch}`);
+        console.log(`------------------------------------------------------------------`);
+
         const t0 = Date.now();
 
-        // Sample a balanced batch or iterate through windows in minibatches
-        // We shuffle indices for stochastic mini-batch training
-        const indices = Array.from({ length: totalSamples }, (_, i) => i);
-        for (let i = indices.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [indices[i], indices[j]] = [indices[j], indices[i]];
+        // Randomly sample SAMPLES_PER_EPOCH sequences
+        const sampleCount = Math.min(totalSamples, SAMPLES_PER_EPOCH);
+        const indices = [];
+        for (let s = 0; s < sampleCount; s++) {
+            indices.push(Math.floor(Math.random() * totalSamples));
         }
 
-        // Train on subset per epoch for fast iterative feedback or full epoch
-        const maxSamplesPerEpoch = Math.min(totalSamples, 2048);
-        const batchInputs = [];
-        const batchTargets = [];
+        const batchInputs = indices.map(i => allInputs[i]);
+        const batchTargets = indices.map(i => allTargets[i]);
 
-        for (let k = 0; k < maxSamplesPerEpoch; k++) {
-            const idx = indices[k];
-            batchInputs.push(allInputs[idx]);
-            batchTargets.push(allTargets[idx]);
-        }
+        const totalBatches = Math.ceil(sampleCount / BATCH_SIZE);
 
-        const xTensor = tf.tensor2d(batchInputs, [maxSamplesPerEpoch, CONTEXT_WINDOW], 'int32');
+        const xTensor = tf.tensor2d(batchInputs, [sampleCount, CONTEXT_WINDOW], 'int32');
         const yTensor = tf.tensor1d(batchTargets, 'float32');
 
         const history = await model.fit(xTensor, yTensor, {
             batchSize: BATCH_SIZE,
             epochs: 1,
             shuffle: true,
-            verbose: 0
+            verbose: 0,
+            callbacks: {
+                onBatchEnd: (batch, logs) => {
+                    const bNum = batch + 1;
+                    const lossStr = logs.loss ? logs.loss.toFixed(4) : "N/A";
+                    const accStr = logs.acc !== undefined ? (logs.acc * 100).toFixed(1) + "%" : "N/A";
+                    console.log(`  [Epoch ${epoch}] Batch ${bNum}/${totalBatches} | Loss: ${lossStr} | Acc: ${accStr}`);
+                }
+            }
         });
 
         const loss = history.history.loss[0];
         const acc = history.history.acc ? history.history.acc[0] : 0;
-        const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
         xTensor.dispose();
         yTensor.dispose();
 
-        console.log(`Epoch ${epoch}/${epochs} - Loss: ${loss.toFixed(4)} | Acc: ${(acc * 100).toFixed(1)}% | Time: ${elapsed}s`);
+        console.log(`\n[Epoch ${epoch} Finished] Loss: ${loss.toFixed(4)} | Accuracy: ${(acc * 100).toFixed(1)}% | Duration: ${elapsed}s`);
 
-        // Save weights checkpoint every 2 epochs or last
-        if (epoch % 2 === 0 || epoch === epochs) {
-            saveWeightsCheckpoint(model, vocab, config, epoch, loss, acc);
+        // Save Checkpoint after EVERY epoch
+        saveWeightsCheckpoint(model, vocab, config, epoch, loss, acc);
+
+        // Run LLM Tests after EVERY epoch
+        console.log(`\n--- [Epoch ${epoch}] LLM Generation Test Results ---`);
+        const epochTestResults = {
+            epoch,
+            loss,
+            accuracy: acc,
+            timestamp: new Date().toISOString(),
+            tests: []
+        };
+
+        for (const testCase of evalSuites) {
+            const output = testGeneration(model, vocab, vocabMap, testCase.prompt, 45);
+            epochTestResults.tests.push({
+                category: testCase.category,
+                prompt: testCase.prompt,
+                response: output
+            });
+            console.log(`\n  [${testCase.category}] Prompt: "${testCase.prompt}"`);
+            console.log(`  Generated: ${output.slice(0, 160)}${output.length > 160 ? '...' : ''}`);
         }
 
-        // Test generation every 5 epochs
-        if (epoch % 5 === 0) {
-            const samplePrompt = "hello";
-            const sampleGen = testGeneration(model, vocab, vocabMap, samplePrompt);
-            console.log(`  Sample Gen ["${samplePrompt}"]: ${sampleGen.slice(0, 80)}...`);
-        }
+        evalHistory.push(epochTestResults);
+        fs.writeFileSync(EVAL_FILE, JSON.stringify(evalHistory, null, 2), 'utf8');
+        console.log(`\n[Eval] Saved LLM generation review to ${EVAL_FILE}`);
     }
 
-    console.log("==================================================================");
-    console.log("✅ Training Complete! Model weights saved to model_weights.json");
+    console.log("\n==================================================================");
+    console.log("✅ Training Loop Finished! Latest weights in model_weights.json");
     console.log("==================================================================");
 }
 
