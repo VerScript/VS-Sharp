@@ -1,5 +1,5 @@
-// train.js — VS#-15M Deep Neural Language Model Trainer
-// Trains a 15,000,000 parameter neural network on VerScript & Polyglot Injection Languages (Python, JS, C, etc.)
+// train.js — VS#-15M Deep Neural Language Model Trainer (Fixed & Optimized)
+// Trains a neural network model on VerScript & Polyglot Injection Languages (Python, JS, C, etc.)
 
 const fs = require('fs');
 const path = require('path');
@@ -11,14 +11,14 @@ try {
     tf = require('@tensorflow/tfjs');
 }
 
-// --- ARCHITECTURE CONSTANTS (TARGET: 15 MILLION PARAMETERS) ---
+// --- ARCHITECTURE CONSTANTS ---
 const TARGET_PARAMS = 15000000;
 const CONTEXT_WINDOW = 48;
 const EMBED_DIM = 256;
 const HIDDEN_SIZE_2 = 512;
-const LEARNING_RATE = 0.003;
+const LEARNING_RATE = 0.0003; // Safe learning rate to prevent tanh/relu gradient explosions
 const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || '32', 10);
-const SAMPLES_PER_EPOCH = parseInt(process.env.SAMPLES_PER_EPOCH || '384', 10);
+const SAMPLES_PER_EPOCH = parseInt(process.env.SAMPLES_PER_EPOCH || '4096', 10); // Ensure enough steps per epoch
 const DEFAULT_EPOCHS = 50;
 
 const DATA_FILE = path.join(__dirname, 'knowledge', 'training_data.json');
@@ -49,7 +49,7 @@ function calculateHiddenSize(vocabSize) {
     return Math.max(64, Math.round(numerator / denominator));
 }
 
-// --- BUILD 15M PARAMETER NEURAL MODEL ---
+// --- BUILD STABLE NEURAL MODEL ---
 function buildModel(vocabSize, hiddenSize1) {
     const model = tf.sequential();
 
@@ -63,23 +63,26 @@ function buildModel(vocabSize, hiddenSize1) {
     // 2. Flatten: [batch, CONTEXT_WINDOW * EMBED_DIM]
     model.add(tf.layers.flatten());
 
-    // 3. Dense Hidden Layer 1: [batch, H1]
+    // 3. Dense Hidden Layer 1 (ReLU to prevent saturation)
     model.add(tf.layers.dense({
         units: hiddenSize1,
-        activation: 'tanh',
+        activation: 'relu',
+        kernelInitializer: 'heNormal',
         useBias: true
     }));
 
-    // 4. Dense Hidden Layer 2: [batch, H2]
+    // 4. Dense Hidden Layer 2 (ReLU)
     model.add(tf.layers.dense({
         units: HIDDEN_SIZE_2,
-        activation: 'tanh',
+        activation: 'relu',
+        kernelInitializer: 'heNormal',
         useBias: true
     }));
 
-    // 5. Output Logits: [batch, vocabSize]
+    // 5. Output Probabilities Layer (Softmax required for sparseCategoricalCrossentropy)
     model.add(tf.layers.dense({
         units: vocabSize,
+        activation: 'softmax',
         useBias: true
     }));
 
@@ -92,7 +95,7 @@ function buildModel(vocabSize, hiddenSize1) {
     return model;
 }
 
-// --- GENERATE SAMPLE TEST OUTPUT ---
+// --- ROBUST TEST GENERATION WITH REPETITION PENALTY ---
 function testGeneration(model, vocab, vocabMap, promptText, maxTokens = 50) {
     const padIdx = vocabMap.get('<pad>') ?? 0;
     const startIdx = vocabMap.get('<start>') ?? 1;
@@ -108,6 +111,7 @@ function testGeneration(model, vocab, vocabMap, promptText, maxTokens = 50) {
     seq.push(sepIdx);
 
     const generated = [];
+    const generatedSet = new Set();
 
     for (let step = 0; step < maxTokens; step++) {
         const ctx = [];
@@ -117,16 +121,27 @@ function testGeneration(model, vocab, vocabMap, promptText, maxTokens = 50) {
         }
 
         const inputTensor = tf.tensor2d([ctx], [1, CONTEXT_WINDOW], 'int32');
-        const logits = model.predict(inputTensor);
-        const probs = tf.softmax(logits).squeeze().arraySync();
+        const predTensor = model.predict(inputTensor);
+        const probs = predTensor.squeeze().arraySync();
         inputTensor.dispose();
-        logits.dispose();
+        predTensor.dispose();
 
-        // Sample with temperature
+        // Apply temperature, top-K filtering, and repetition penalty to prevent loops
         const temp = 0.75;
-        const logProbs = probs.map(p => Math.log(p + 1e-10) / temp);
-        const maxLog = Math.max(...logProbs);
-        const exps = logProbs.map(lp => Math.exp(lp - maxLog));
+        const repetitionPenalty = 1.35;
+        const logProbs = probs.map((p, idx) => {
+            let lp = Math.log(Math.max(p, 1e-10));
+            if (generatedSet.has(idx)) lp -= Math.log(repetitionPenalty);
+            if (idx === padIdx || idx === unkIdx || idx === startIdx || idx === sepIdx) lp = -1e9;
+            return lp / temp;
+        });
+
+        const topK = 30;
+        const indexed = logProbs.map((lp, idx) => ({ lp, idx })).sort((a, b) => b.lp - a.lp);
+        const topCandidates = indexed.slice(0, topK);
+
+        const maxLog = topCandidates[0].lp;
+        const exps = topCandidates.map(c => Math.exp(c.lp - maxLog));
         const sumExp = exps.reduce((a, b) => a + b, 0);
         const softProbs = exps.map(e => e / (sumExp || 1e-10));
 
@@ -136,20 +151,21 @@ function testGeneration(model, vocab, vocabMap, promptText, maxTokens = 50) {
         for (let i = 0; i < softProbs.length; i++) {
             cum += softProbs[i];
             if (r <= cum) {
-                nextIdx = i;
+                nextIdx = topCandidates[i].idx;
                 break;
             }
         }
 
         if (nextIdx === endIdx) break;
         seq.push(nextIdx);
+        generatedSet.add(nextIdx);
         generated.push(vocab[nextIdx]);
     }
 
     return generated.join(' ').replace(/ \n /g, '\n').replace(/ \n/g, '\n').replace(/\n /g, '\n');
 }
 
-// --- SAVE MODEL WEIGHTS ---
+// --- SAVE WEIGHTS CHECKPOINT ---
 function saveWeightsCheckpoint(model, vocab, config, epoch, loss, accuracy) {
     const layers = model.layers;
     const E = layers[0].getWeights()[0].arraySync();
@@ -177,7 +193,7 @@ function saveWeightsCheckpoint(model, vocab, config, epoch, loss, accuracy) {
 // --- MAIN TRAINING LOOP ---
 async function main() {
     console.log("==================================================================");
-    console.log("🚀 VS#-15M Neural Language Model & Polyglot Trainer (15M Params)");
+    console.log("🚀 VS#-15M Neural Language Model & Polyglot Trainer (Fixed)");
     console.log("==================================================================");
 
     const isReset = process.argv.includes('--reset');
@@ -297,7 +313,6 @@ async function main() {
 
     console.log(`[Dataset] Total available training sequences: ${allInputs.length.toLocaleString()}`);
 
-    // Evaluation prompts to test after every epoch
     const evalSuites = [
         { category: "Conversation", prompt: "hello" },
         { category: "VerScript", prompt: "write a hello world program in verscript" },
@@ -306,7 +321,6 @@ async function main() {
         { category: "Inject C", prompt: "write c code for binary search" }
     ];
 
-    // Load or initialize evaluation history
     let evalHistory = [];
     if (fs.existsSync(EVAL_FILE)) {
         try { evalHistory = JSON.parse(fs.readFileSync(EVAL_FILE, 'utf8')); } catch (_) {}
@@ -332,7 +346,6 @@ async function main() {
 
         const t0 = Date.now();
 
-        // Randomly sample SAMPLES_PER_EPOCH sequences
         const sampleCount = Math.min(totalSamples, SAMPLES_PER_EPOCH);
         const indices = [];
         for (let s = 0; s < sampleCount; s++) {
@@ -341,7 +354,6 @@ async function main() {
 
         const batchInputs = indices.map(i => allInputs[i]);
         const batchTargets = indices.map(i => allTargets[i]);
-
         const totalBatches = Math.ceil(sampleCount / BATCH_SIZE);
 
         const xTensor = tf.tensor2d(batchInputs, [sampleCount, CONTEXT_WINDOW], 'int32');
@@ -371,10 +383,8 @@ async function main() {
 
         console.log(`\n[Epoch ${epoch} Finished] Loss: ${loss.toFixed(4)} | Accuracy: ${(acc * 100).toFixed(1)}% | Duration: ${elapsed}s`);
 
-        // Save Checkpoint after EVERY epoch
         saveWeightsCheckpoint(model, vocab, config, epoch, loss, acc);
 
-        // Run LLM Tests after EVERY epoch
         console.log(`\n--- [Epoch ${epoch}] LLM Generation Test Results ---`);
         const epochTestResults = {
             epoch,
