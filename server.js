@@ -289,12 +289,12 @@ function mountRoutes(app, prefix = '') {
         }
     });
 
-    // 3. VerScript Code Runner Endpoint
+    // 3. VerScript Code Runner Endpoint (Single and Multi-File Support)
     app.post(prefix + '/run', (req, res) => {
-        const { code } = req.body;
+        const { code, files } = req.body;
 
-        if (typeof code !== 'string') {
-            return res.status(400).json({ error: 'Code string is required.' });
+        if (typeof code !== 'string' && (!Array.isArray(files) || files.length === 0)) {
+            return res.status(400).json({ error: 'Code string or files array is required.' });
         }
 
         const bin = resolveVerScriptBinary();
@@ -304,11 +304,30 @@ function mountRoutes(app, prefix = '') {
 
         try { fs.chmodSync(bin, 0o755); } catch (_) {}
 
-        const tmpFile = path.join(os.tmpdir(), `vrs_${Date.now()}_${Math.random().toString(36).substring(7)}.vrs`);
-        fs.writeFileSync(tmpFile, code, 'utf8');
+        const sandboxDir = path.join(os.tmpdir(), `vrs_box_${Date.now()}_${Math.random().toString(36).substring(7)}`);
+        fs.mkdirSync(sandboxDir, { recursive: true });
 
-        execFile(bin, [tmpFile], { timeout: 10000, cwd: path.dirname(bin) }, (error, stdout, stderr) => {
-            try { fs.unlinkSync(tmpFile); } catch (_) {}
+        let entryFile = path.join(sandboxDir, 'main.vrs');
+
+        if (Array.isArray(files) && files.length > 0) {
+            files.forEach(f => {
+                if (f && f.name && typeof f.content === 'string') {
+                    const targetPath = path.join(sandboxDir, f.name);
+                    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+                    fs.writeFileSync(targetPath, f.content, 'utf8');
+                    if (f.name.endsWith('.vrs') && !f.name.endsWith('.h.vrs')) {
+                        entryFile = targetPath;
+                    }
+                }
+            });
+        }
+
+        if (code && typeof code === 'string') {
+            fs.writeFileSync(entryFile, code, 'utf8');
+        }
+
+        execFile(bin, [entryFile], { timeout: 10000, cwd: sandboxDir }, (error, stdout, stderr) => {
+            try { fs.rmSync(sandboxDir, { recursive: true, force: true }); } catch (_) {}
 
             if (error && error.killed) {
                 return res.json({ output: stdout || '', error: 'Execution timed out (10s limit).' });
