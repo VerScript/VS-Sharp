@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const os = require('os');
 
 let tf;
@@ -289,9 +289,9 @@ function mountRoutes(app, prefix = '') {
         }
     });
 
-    // 3. VerScript Code Runner Endpoint (Single and Multi-File Support)
+    // 3. VerScript Code Runner Endpoint (Single and Multi-File Support with interactive Stdin)
     app.post(prefix + '/run', (req, res) => {
-        const { code, files } = req.body;
+        const { code, files, stdin } = req.body;
 
         if (typeof code !== 'string' && (!Array.isArray(files) || files.length === 0)) {
             return res.status(400).json({ error: 'Code string or files array is required.' });
@@ -326,17 +326,44 @@ function mountRoutes(app, prefix = '') {
             fs.writeFileSync(entryFile, code, 'utf8');
         }
 
-        execFile(bin, [entryFile], { timeout: 10000, cwd: sandboxDir }, (error, stdout, stderr) => {
+        let stdout = '';
+        let stderr = '';
+        let killed = false;
+        const child = spawn(bin, [entryFile], { cwd: sandboxDir });
+
+        const timer = setTimeout(() => {
+            killed = true;
+            try { child.kill(); } catch (_) {}
+        }, 10000);
+
+        if (child.stdin) {
+            if (typeof stdin === 'string' && stdin.length > 0) {
+                child.stdin.write(stdin);
+            }
+            child.stdin.end();
+        }
+
+        child.stdout.on('data', d => { stdout += d.toString(); });
+        child.stderr.on('data', d => { stderr += d.toString(); });
+
+        child.on('close', () => {
+            clearTimeout(timer);
             try { fs.rmSync(sandboxDir, { recursive: true, force: true }); } catch (_) {}
 
-            if (error && error.killed) {
+            if (killed) {
                 return res.json({ output: stdout || '', error: 'Execution timed out (10s limit).' });
             }
 
             res.json({
                 output: stdout || '',
-                error: stderr || (error && !stdout ? error.message : '') || ''
+                error: stderr || ''
             });
+        });
+
+        child.on('error', (err) => {
+            clearTimeout(timer);
+            try { fs.rmSync(sandboxDir, { recursive: true, force: true }); } catch (_) {}
+            res.json({ output: stdout || '', error: err.message });
         });
     });
 }

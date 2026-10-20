@@ -1,0 +1,68 @@
+[
+  {
+    "epoch": 1,
+    "loss": 9.494257926940918,
+    "accuracy": 0.0989583358168602,
+    "timestamp": "2026-10-18T09:50:15.375Z",
+    "tests": [
+      {
+        "category": "Conversation",
+        "prompt": "hello",
+        "response": "═ ═ localhost ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ . . . . . ."
+      },
+      {
+        "category": "VerScript",
+        "prompt": "write a hello world program in verscript",
+        "response": "═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ Ephemeral . . . . . . . . . . ."
+      },
+      {
+        "category": "Inject Python",
+        "prompt": "how to run python in verscript",
+        "response": "═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ . . . . . . . . . ."
+      },
+      {
+        "category": "Inject JS",
+        "prompt": "write javascript async fetch function",
+        "response": "═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ . . . . . . . . ."
+      },
+      {
+        "category": "Inject C",
+        "prompt": "write c code for binary search",
+        "response": "═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ . . . . . . . ."
+      }
+    ]
+  },
+  {
+    "epoch": 2,
+    "loss": 9.18354320526123,
+    "accuracy": 0.0859375,
+    "timestamp": "2026-10-18T11:04:48.116Z",
+    "tests": [
+      {
+        "category": "Conversation",
+        "prompt": "hello",
+        "response": "═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ . . . . . ."
+      },
+      {
+        "category": "VerScript",
+        "prompt": "write a hello world program in verscript",
+        "response": "═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ . . . . . . . ."
+      },
+      {
+        "category": "Inject Python",
+        "prompt": "how to run python in verscript",
+        "response": "═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ . . . . . . . ."
+      },
+      {
+        "category": "Inject JS",
+        "prompt": "write javascript async fetch function",
+        "response": "═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ . ═ . . . . . ."
+      },
+      {
+        "category": "Inject C",
+        "prompt": "write c code for binary search",
+        "response": "═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ ═ . . . . . . . ."
+      }
+    ]
+  }
+]
