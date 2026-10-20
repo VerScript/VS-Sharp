@@ -260,19 +260,23 @@ async function main() {
             if (prevData.epoch) startingEpoch = prevData.epoch + 1;
             const w = prevData.weights;
             if (w && w.E && w.W1 && w.b1 && w.W2 && w.b2 && w.W3 && w.b3) {
-                model.layers[0].setWeights([tf.tensor2d(w.E, [vocabSize, EMBED_DIM])]);
-                model.layers[2].setWeights([
-                    tf.tensor2d(w.W1, [CONTEXT_WINDOW * EMBED_DIM, hiddenSize1]),
-                    tf.tensor1d(w.b1)
-                ]);
-                model.layers[3].setWeights([
-                    tf.tensor2d(w.W2, [hiddenSize1, HIDDEN_SIZE_2]),
-                    tf.tensor1d(w.b2)
-                ]);
-                model.layers[4].setWeights([
-                    tf.tensor2d(w.W3, [HIDDEN_SIZE_2, vocabSize]),
-                    tf.tensor1d(w.b3)
-                ]);
+                const E = tf.tensor2d(w.E, [vocabSize, EMBED_DIM]);
+                model.layers[0].setWeights([E]);
+
+                const W1 = tf.tensor2d(w.W1, [CONTEXT_WINDOW * EMBED_DIM, hiddenSize1]);
+                const b1 = tf.tensor1d(w.b1);
+                model.layers[2].setWeights([W1, b1]);
+
+                const W2 = tf.tensor2d(w.W2, [hiddenSize1, HIDDEN_SIZE_2]);
+                const b2 = tf.tensor1d(w.b2);
+                model.layers[3].setWeights([W2, b2]);
+
+                const W3 = tf.tensor2d(w.W3, [HIDDEN_SIZE_2, vocabSize]);
+                const b3 = tf.tensor1d(w.b3);
+                model.layers[4].setWeights([W3, b3]);
+
+                tf.dispose([E, W1, b1, W2, b2, W3, b3]);
+
                 console.log(`[Setup] Successfully resumed from epoch ${prevData.epoch} (loss: ${prevData.loss || 'N/A'})!`);
             }
         } catch (e) {
