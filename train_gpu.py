@@ -176,11 +176,19 @@ def export_weights(model, vocab, config, epoch, loss, acc):
         "updatedAt": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     }
 
+    import gzip
     tmp_file = WEIGHTS_FILE + ".tmp"
     with open(tmp_file, "w", encoding="utf-8") as f:
         json.dump(data, f)
     os.replace(tmp_file, WEIGHTS_FILE)
-    print(f"[Export] Saved Epoch {epoch} weights ({config['parameterDisplay']}) to model_weights.json")
+
+    gz_tmp = WEIGHTS_FILE + ".gz.tmp"
+    with gzip.open(gz_tmp, "wt", encoding="utf-8") as f:
+        json.dump(data, f)
+    os.replace(gz_tmp, WEIGHTS_FILE + ".gz")
+
+    gz_mb = os.path.getsize(WEIGHTS_FILE + ".gz") / (1024 * 1024)
+    print(f"[Export] Saved Epoch {epoch} weights ({config['parameterDisplay']}) to model_weights.json & model_weights.json.gz ({gz_mb:.1f} MB - GitHub ready!)")
 
 # --- MAIN TRAINING LOOP ---
 def main():

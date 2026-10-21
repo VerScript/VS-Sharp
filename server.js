@@ -6,6 +6,8 @@ const path = require('path');
 const { execFile, spawn } = require('child_process');
 const os = require('os');
 
+const zlib = require('zlib');
+
 let tf;
 try {
     tf = require('@tensorflow/tfjs-node');
@@ -14,6 +16,21 @@ try {
 }
 
 const WEIGHTS_FILE = path.join(__dirname, 'model_weights.json');
+const WEIGHTS_GZ = path.join(__dirname, 'model_weights.json.gz');
+
+function getWeightsData() {
+    if (fs.existsSync(WEIGHTS_FILE)) {
+        try { return JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8')); } catch (_) {}
+    }
+    if (fs.existsSync(WEIGHTS_GZ)) {
+        try {
+            const buf = fs.readFileSync(WEIGHTS_GZ);
+            const decompressed = zlib.gunzipSync(buf).toString('utf8');
+            return JSON.parse(decompressed);
+        } catch (_) {}
+    }
+    return null;
+}
 
 // --- VS#-15M DEFAULT CONFIGURATION ---
 const DEFAULT_CONFIG = {
@@ -222,14 +239,12 @@ function mountRoutes(app, prefix = '') {
         let loss = 0;
         let accuracy = 0;
 
-        if (fs.existsSync(WEIGHTS_FILE)) {
-            try {
-                const w = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
-                if (w.config) loadedConfig = { ...DEFAULT_CONFIG, ...w.config };
-                if (w.epoch !== undefined) epoch = w.epoch;
-                if (w.loss !== undefined) loss = w.loss;
-                if (w.accuracy !== undefined) accuracy = w.accuracy;
-            } catch (_) {}
+        const weightsData = getWeightsData();
+        if (weightsData) {
+            if (weightsData.config) loadedConfig = { ...DEFAULT_CONFIG, ...weightsData.config };
+            if (weightsData.epoch !== undefined) epoch = weightsData.epoch;
+            if (weightsData.loss !== undefined) loss = weightsData.loss;
+            if (weightsData.accuracy !== undefined) accuracy = weightsData.accuracy;
         }
 
         res.json({
@@ -239,7 +254,7 @@ function mountRoutes(app, prefix = '') {
             loss,
             accuracy,
             backend: tf.getBackend(),
-            weightsLoaded: fs.existsSync(WEIGHTS_FILE)
+            weightsLoaded: weightsData !== null
         });
     });
 
@@ -253,16 +268,15 @@ function mountRoutes(app, prefix = '') {
 
         console.log(`[VS#-15M] Input received: "${message}"`);
 
-        // Check if weights file exists
-        if (!fs.existsSync(WEIGHTS_FILE)) {
+        const weightsData = getWeightsData();
+        if (!weightsData) {
             return res.json({
-                response: "VS#-15M model weights are currently initializing or training. Please run 'node train.js' to start learning.",
+                response: "VS#-15M model weights are currently initializing or training. Please run 'node train.js' or Colab GPU trainer to start learning.",
                 action: null
             });
         }
 
         try {
-            const weightsData = JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8'));
 
             // ALWAYS generate dynamically using the neural language model
             // No hardcoded or pre-written answers are allowed
