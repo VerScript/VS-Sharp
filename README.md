@@ -16,18 +16,33 @@ Official Neural Language Model & Intelligent Runtime Engine for **VerScript** an
 
 ---
 
-## ⚡ Fast GPU Training with Google Colab (Tesla T4)
+## ⚡ Fast Cloud GPU Training (Kaggle & Colab)
 
-Training 15 million parameters on CPU is computationally intensive. We provide a fully automated, one-click GPU training pipeline optimized for **Google Colab Tesla T4 GPUs**.
+Training 15 million parameters on CPU is computationally intensive (~40 min/epoch). With cloud GPUs (Tesla T4 or P100), training takes **only ~3 to 5 seconds per epoch**!
 
-### Quickstart on Colab:
-1. Click the **[Open In Colab](https://colab.research.google.com/github/VerScript/VS-Sharp/blob/main/colab_train.ipynb)** badge.
+### Option A: Kaggle Notebooks (30 Hours/Week FREE GPU)
+Kaggle provides **30 hours per week of completely free GPU compute** with **Tesla T4 x2** or **Tesla P100** (no credit limits!):
+
+1. Go to [kaggle.com](https://www.kaggle.com) and click **Create > New Notebook**.
+2. Click **File > Import Notebook** and upload [`kaggle_train.ipynb`](https://github.com/VerScript/VS-Sharp/blob/main/kaggle_train.ipynb) (or select **Upload from URL**).
+3. In the right-hand panel under **Settings**:
+   - **Accelerator**: Select **GPU T4 x2** or **GPU P100**.
+   - **Internet**: Toggle to **Internet on** (required to clone from GitHub).
+4. Run all cells (`Shift + Enter`).
+5. After training completes, look at the right sidebar under **Data > Output** to download `model_weights.json.gz` with a single click!
+
+---
+
+### Option B: Google Colab (Tesla T4)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/VerScript/VS-Sharp/blob/main/colab_train.ipynb)
+
+1. Open [`colab_train.ipynb`](https://colab.research.google.com/github/VerScript/VS-Sharp/blob/main/colab_train.ipynb) in Colab.
 2. Select **Runtime > Change runtime type > T4 GPU**.
 3. Run all cells or execute:
    ```bash
-   python train_gpu.py --epochs 50 --batch-size 128 --samples-per-epoch 12000
+   python train_gpu.py --epochs 50 --batch-size 128 --samples-per-epoch 15000
    ```
-4. Download the resulting `model_weights.json` or push directly to GitHub.
+4. Download `model_weights.json.gz` via Section 7 or push directly to GitHub via Section 8.
 
 ---
 
