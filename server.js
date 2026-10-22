@@ -20,13 +20,20 @@ const https = require('https');
 const WEIGHTS_FILE = path.join(__dirname, 'model_weights.json');
 const WEIGHTS_GZ = path.join(__dirname, 'model_weights.json.gz');
 
+const DEFAULT_WEIGHTS_URL = "https://huggingface.co/alexon-v8/VS-Sharp/resolve/main/model_weights.json";
+
 function downloadWeightsSync(url, dest) {
     try {
         console.log(`[VS#-15M] Auto-downloading weights from remote: ${url}...`);
         const { execSync } = require('child_process');
-        execSync(`curl -L -s -o "${dest}" "${url}"`, { timeout: 60000 });
-        console.log(`[VS#-15M] Download complete: ${dest}`);
-        return true;
+        const isWin = os.platform() === 'win32';
+        const curlCmd = isWin ? 'curl.exe' : 'curl';
+        execSync(`${curlCmd} -L -s -o "${dest}" "${url}"`, { timeout: 180000 });
+        if (fs.existsSync(dest) && fs.statSync(dest).size > 1000) {
+            console.log(`[VS#-15M] Download complete: ${dest} (${(fs.statSync(dest).size / (1024*1024)).toFixed(1)} MB)`);
+            return true;
+        }
+        return false;
     } catch (e) {
         console.warn(`[VS#-15M] Failed to auto-download weights: ${e.message}`);
         return false;
@@ -44,8 +51,8 @@ function getWeightsData() {
             return JSON.parse(decompressed);
         } catch (_) {}
     }
-    // Check if remote URL configured via environment variable
-    const remoteUrl = process.env.MODEL_WEIGHTS_URL;
+    // Automatically load from Hugging Face if not on disk!
+    const remoteUrl = process.env.MODEL_WEIGHTS_URL || DEFAULT_WEIGHTS_URL;
     if (remoteUrl) {
         const dest = remoteUrl.endsWith('.gz') ? WEIGHTS_GZ : WEIGHTS_FILE;
         if (downloadWeightsSync(remoteUrl, dest)) {
