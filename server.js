@@ -18,6 +18,35 @@ try {
 const WEIGHTS_FILE = path.join(__dirname, 'model_weights.json');
 const WEIGHTS_GZ = path.join(__dirname, 'model_weights.json.gz');
 
+const https = require('https');
+
+function downloadRemoteWeights(url, dest) {
+    return new Promise((resolve, reject) => {
+        console.log(`[VS#-15M] Auto-downloading weights from: ${url}...`);
+        const file = fs.createWriteStream(dest);
+        const req = https.get(url, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                return downloadRemoteWeights(res.headers.location, dest).then(resolve).catch(reject);
+            }
+            if (res.statusCode !== 200) {
+                fs.unlink(dest, () => {});
+                return reject(new Error(`HTTP ${res.statusCode}`));
+            }
+            res.pipe(file);
+            file.on('finish', () => {
+                file.close(() => {
+                    console.log(`[VS#-15M] Weights downloaded successfully to ${dest}`);
+                    resolve(true);
+                });
+            });
+        });
+        req.on('error', (err) => {
+            fs.unlink(dest, () => {});
+            reject(err);
+        });
+    });
+}
+
 function getWeightsData() {
     if (fs.existsSync(WEIGHTS_FILE)) {
         try { return JSON.parse(fs.readFileSync(WEIGHTS_FILE, 'utf8')); } catch (_) {}
