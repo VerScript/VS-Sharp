@@ -198,8 +198,6 @@ def main():
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate (Adam)")
     parser.add_argument("--samples-per-epoch", type=int, default=10000, help="Samples trained per epoch")
     parser.add_argument("--reset", action="store_true", help="Reset weights to epoch 0")
-    parser.add_argument("--hf-repo", type=str, default=None, help="Hugging Face repo to upload to (e.g. username/VS-Sharp)")
-    parser.add_argument("--hf-token", type=str, default=os.environ.get("HF_TOKEN"), help="Hugging Face write token")
     args = parser.parse_args()
 
     print("=" * 68)
@@ -412,29 +410,6 @@ def main():
     print("=" * 68)
     print("✅ GPU Training Complete! Exported latest weights to model_weights.json")
     print("=" * 68)
-
-    if args.hf_repo:
-        try:
-            print(f"\n[HuggingFace] Uploading weights to https://huggingface.co/{args.hf_repo}...")
-            from huggingface_hub import HfApi
-            api = HfApi(token=args.hf_token)
-            api.create_repo(repo_id=args.hf_repo, repo_type="model", exist_ok=True)
-            api.upload_file(
-                path_or_fileobj=WEIGHTS_FILE + ".gz",
-                path_in_repo="model_weights.json.gz",
-                repo_id=args.hf_repo,
-                repo_type="model"
-            )
-            api.upload_file(
-                path_or_fileobj=EVAL_FILE,
-                path_in_repo="epoch_eval_history.json",
-                repo_id=args.hf_repo,
-                repo_type="model"
-            )
-            print(f"✅ Successfully published model weights to https://huggingface.co/{args.hf_repo}!")
-            print(f"👉 Direct instant download URL:\n   https://huggingface.co/{args.hf_repo}/resolve/main/model_weights.json.gz")
-        except Exception as e:
-            print(f"[HuggingFace] Upload failed: {e}")
 
 if __name__ == "__main__":
     main()
