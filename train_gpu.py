@@ -4,10 +4,11 @@ VS#-15M Advanced GPU Trainer (PyTorch / CUDA)
 Optimized for Tesla T4 / P100 GPUs (Kaggle & Colab).
 Features:
 - 15,005,577 Parameter Deep Neural Architecture
-- Resumes automatically from Hugging Face or local checkpoint
+- Resumes automatically from Hugging Face or local checkpoint (Epoch 150 -> 151+)
+- Warm-Start Vocabulary Alignment (Strictly preserves 100% of pre-trained weights)
+- Anti-Memorization Regularization: Dropout (p=0.15) + Label Smoothing (0.1) + AdamW Weight Decay (1e-2)
 - Mixed Precision (FP16 AMP) for 2x faster GPU Tensor Core throughput
-- AdamW + Cosine Annealing Learning Rate Scheduler
-- Gradient Clipping for training stability
+- Cosine Annealing Learning Rate Scheduler for fine-tuning without catastrophic forgetting
 - Top-p (Nucleus) + Temperature sampling to eliminate garbled tokens
 - Automatic export to model_weights.json and model_weights.json.gz (<45 MB)
 - Automated push back to Hugging Face Hub
@@ -59,9 +60,9 @@ def calculate_hidden_size(vocab_size):
     denominator = CONTEXT_WINDOW * EMBED_DIM + 1 + HIDDEN_SIZE_2
     return max(64, round(numerator / denominator))
 
-# --- PYTORCH NEURAL MODEL ---
+# --- PYTORCH NEURAL MODEL WITH DROPOUT (ANTI-OVERFITTING) ---
 class VSSharp15M(nn.Module):
-    def __init__(self, vocab_size, hidden_size_1):
+    def __init__(self, vocab_size, hidden_size_1, dropout_p=0.15):
         super().__init__()
         self.vocab_size = vocab_size
         self.context_window = CONTEXT_WINDOW
@@ -75,10 +76,12 @@ class VSSharp15M(nn.Module):
         # 2. Hidden Layer 1: [batch, CONTEXT_WINDOW * EMBED_DIM] -> [batch, H1]
         self.fc1 = nn.Linear(CONTEXT_WINDOW * EMBED_DIM, hidden_size_1)
         self.act1 = nn.Tanh()
+        self.drop1 = nn.Dropout(p=dropout_p)
 
         # 3. Hidden Layer 2: [batch, H1] -> [batch, H2]
         self.fc2 = nn.Linear(hidden_size_1, HIDDEN_SIZE_2)
         self.act2 = nn.Tanh()
+        self.drop2 = nn.Dropout(p=dropout_p)
 
         # 4. Output Logits: [batch, H2] -> [batch, vocab_size]
         self.fc_out = nn.Linear(HIDDEN_SIZE_2, vocab_size)
@@ -86,8 +89,8 @@ class VSSharp15M(nn.Module):
     def forward(self, x):
         embeds = self.embedding(x)
         flat = embeds.view(embeds.size(0), -1)
-        h1 = self.act1(self.fc1(flat))
-        h2 = self.act2(self.fc2(h1))
+        h1 = self.drop1(self.act1(self.fc1(flat)))
+        h2 = self.drop2(self.act2(self.fc2(h1)))
         logits = self.fc_out(h2)
         return logits
 
@@ -107,7 +110,7 @@ class SequenceDataset(Dataset):
         return self.inputs[idx], self.targets[idx]
 
 # --- TOP-P NUCLEUS SAMPLING (PREVENTS GARBLED REPETITION) ---
-def sample_token(logits, temperature=0.7, top_p=0.9):
+def sample_token(logits, temperature=0.75, top_p=0.9):
     logits = logits / max(temperature, 1e-5)
     probs = torch.softmax(logits, dim=-1)
     sorted_probs, sorted_indices = torch.sort(probs, descending=True)
@@ -126,7 +129,7 @@ def sample_token(logits, temperature=0.7, top_p=0.9):
     return torch.argmax(logits).item()
 
 # --- TEXT GENERATION TESTER ---
-def generate_text(model, vocab, vocab_map, prompt, device, max_tokens=55, temperature=0.7, top_p=0.9):
+def generate_text(model, vocab, vocab_map, prompt, device, max_tokens=60, temperature=0.75, top_p=0.9):
     model.eval()
     pad_idx = vocab_map.get('<pad>', 0)
     start_idx = vocab_map.get('<start>', 1)
@@ -159,43 +162,40 @@ def generate_text(model, vocab, vocab_map, prompt, device, max_tokens=55, temper
             seq.append(next_idx)
             generated.append(vocab[next_idx])
 
-    result = " ".join(generated)
-    result = re.sub(r' \n ', '\n', result)
-    result = re.sub(r' \n', '\n', result)
-    result = re.sub(r'\n ', '\n', result)
-    return result
+    # Reconstruct readable string
+    out = ""
+    for token in generated:
+        if token == '\n':
+            out += '\n'
+        elif len(out) == 0 or out[-1] in ('\n', ' ', '(', '[', '{', '.', '`', ':', '═'):
+            out += token
+        elif token in ('.', ',', ':', ';', ')', ']', '}', '?', '!'):
+            out += token
+        else:
+            out += ' ' + token
+    return out.strip()
 
-# --- EXPORT WEIGHTS FOR SERVER.JS ---
-def export_weights(model, vocab, config, epoch, loss, acc):
-    model.eval()
-    with torch.no_grad():
-        E = model.embedding.weight.cpu().numpy().tolist()
-        W1 = model.fc1.weight.t().cpu().numpy().tolist()
-        b1 = model.fc1.bias.cpu().numpy().tolist()
-        W2 = model.fc2.weight.t().cpu().numpy().tolist()
-        b2 = model.fc2.bias.cpu().numpy().tolist()
-        W3 = model.fc_out.weight.t().cpu().numpy().tolist()
-        b3 = model.fc_out.bias.cpu().numpy().tolist()
-
+# --- EXPORT WEIGHTS FUNCTION ---
+def export_weights(model, vocab, config, epoch, loss, accuracy):
     data = {
         "vocab": vocab,
         "config": config,
         "weights": {
-            "E": E,
-            "W1": W1,
-            "b1": b1,
-            "W2": W2,
-            "b2": b2,
-            "W3": W3,
-            "b3": b3
+            "E": model.embedding.weight.data.cpu().numpy().tolist(),
+            "W1": model.fc1.weight.data.cpu().numpy().T.tolist(),
+            "b1": model.fc1.bias.data.cpu().numpy().tolist(),
+            "W2": model.fc2.weight.data.cpu().numpy().T.tolist(),
+            "b2": model.fc2.bias.data.cpu().numpy().tolist(),
+            "W3": model.fc_out.weight.data.cpu().numpy().T.tolist(),
+            "b3": model.fc_out.bias.data.cpu().numpy().tolist()
         },
         "epoch": epoch,
         "loss": float(loss),
-        "accuracy": float(acc),
+        "accuracy": float(accuracy),
         "updatedAt": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     }
 
-    # 1. Uncompressed JSON
+    # 1. Standard JSON file
     tmp_file = WEIGHTS_FILE + ".tmp"
     with open(tmp_file, "w", encoding="utf-8") as f:
         json.dump(data, f)
@@ -228,17 +228,21 @@ def ensure_weights_available():
 # --- MAIN TRAINING LOOP ---
 def main():
     parser = argparse.ArgumentParser(description="Advanced VS#-15M Trainer (PyTorch / CUDA)")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train (default 50)")
     parser.add_argument("--batch-size", type=int, default=128, help="Batch size (default 128)")
-    parser.add_argument("--lr", type=float, default=0.001, help="Initial learning rate")
-    parser.add_argument("--samples-per-epoch", type=int, default=15000, help="Samples per epoch")
-    parser.add_argument("--reset", action="store_true", help="Reset weights to 0")
+    parser.add_argument("--lr", type=float, default=0.00015, help="Fine-tuning learning rate (default 0.00015)")
+    parser.add_argument("--samples-per-epoch", type=int, default=20000, help="Samples per epoch (default 20000)")
+    parser.add_argument("--dropout", type=float, default=0.15, help="Dropout rate to break memorization (default 0.15)")
+    parser.add_argument("--label-smoothing", type=float, default=0.1, help="Label smoothing to avoid 99.8% overconfidence (default 0.1)")
+    parser.add_argument("--weight-decay", type=float, default=0.01, help="AdamW weight decay regularization (default 0.01)")
+    parser.add_argument("--reset", action="store_true", help="Reset weights to 0 (default: False)")
     parser.add_argument("--hf-token", type=str, default=None, help="Hugging Face Write Token for auto-upload")
     parser.add_argument("--hf-repo", type=str, default="alexon-v8/VS-Sharp", help="Hugging Face model repo ID")
     args = parser.parse_args()
 
     print("=" * 68)
     print("🚀 VS#-15M Deep Neural Language Model Trainer (PyTorch GPU)")
+    print("   Regularized Continuous Training & Warm-Start Architecture")
     print("=" * 68)
 
     # 1. Device Setup & Mixed Precision
@@ -259,24 +263,61 @@ def main():
         raw_data = json.load(f)
     print(f"[Dataset] Loaded {len(raw_data):,} prompt-response pairs from {DATA_FILE}")
 
-    # 3. Vocabulary
+    # 3. Ingest Checkpoint First (Guarantees Vocab Alignment & Preserves Weights)
+    prev_data = None
+    target_load = WEIGHTS_FILE if os.path.exists(WEIGHTS_FILE) else (WEIGHTS_FILE + ".gz")
+    if not os.path.exists(target_load) and not args.reset:
+        ensure_weights_available()
+        target_load = WEIGHTS_FILE if os.path.exists(WEIGHTS_FILE) else (WEIGHTS_FILE + ".gz")
+
+    if os.path.exists(target_load) and not args.reset:
+        try:
+            print(f"[Setup] Reading checkpoint metadata from {target_load}...")
+            if target_load.endswith('.gz'):
+                import gzip
+                with gzip.open(target_load, 'rt', encoding='utf-8') as f:
+                    prev_data = json.load(f)
+            else:
+                with open(target_load, 'r', encoding='utf-8') as f:
+                    prev_data = json.load(f)
+        except Exception as e:
+            print(f"[!] Warning reading checkpoint: {e}")
+
+    # 4. Checkpoint-Aware Vocabulary Alignment
     special_tokens = ['<pad>', '<start>', '<sep>', '<end>', '<unk>']
+    if prev_data and "vocab" in prev_data and len(prev_data["vocab"]) > 0:
+        base_vocab = list(prev_data["vocab"])
+        print(f"🌟 [Vocab Alignment] Preserving all {len(base_vocab):,} base tokens from checkpoint.")
+    else:
+        base_vocab = list(special_tokens)
+
+    existing_set = set(base_vocab)
+    new_tokens = []
     token_counts = {}
     for pair in raw_data:
         p_toks = tokenize(pair.get("prompt", ""))
         r_toks = tokenize(pair.get("response", ""))
-        for t in p_toks: token_counts[t] = token_counts.get(t, 0) + 1
-        for t in r_toks: token_counts[t] = token_counts.get(t, 0) + 1
+        for t in p_toks + r_toks:
+            if t not in existing_set:
+                token_counts[t] = token_counts.get(t, 0) + 1
 
-    sorted_tokens = sorted(token_counts.keys(), key=lambda t: token_counts[t], reverse=True)
-    vocab = special_tokens + sorted_tokens
+    for t, _ in sorted(token_counts.items(), key=lambda x: x[1], reverse=True):
+        new_tokens.append(t)
+        existing_set.add(t)
+
+    vocab = base_vocab + new_tokens
     vocab_map = {t: idx for idx, t in enumerate(vocab)}
     vocab_size = len(vocab)
-    print(f"[Vocab] Built vocabulary of {vocab_size} unique tokens.")
+    old_vocab_size = len(base_vocab) if prev_data else 0
+    print(f"[Vocab] Final vocabulary: {vocab_size} tokens ({old_vocab_size} preserved from checkpoint + {len(new_tokens)} newly mapped).")
 
-    # 4. Model Construction
-    hidden_size_1 = calculate_hidden_size(vocab_size)
-    model = VSSharp15M(vocab_size, hidden_size_1).to(device)
+    # 5. Architecture Construction
+    if prev_data and "config" in prev_data and "hiddenSize" in prev_data["config"]:
+        hidden_size_1 = prev_data["config"]["hiddenSize"]
+    else:
+        hidden_size_1 = calculate_hidden_size(vocab_size)
+
+    model = VSSharp15M(vocab_size, hidden_size_1, dropout_p=args.dropout).to(device)
     actual_params = model.count_parameters()
 
     config = {
@@ -296,8 +337,40 @@ def main():
     print(f"[Model] Context Window    : {CONTEXT_WINDOW} tokens")
     print(f"[Model] Hidden Layer 1    : {hidden_size_1} units")
     print(f"[Model] Hidden Layer 2    : {HIDDEN_SIZE_2} units")
+    print(f"[Model] Regularization    : Dropout p={args.dropout} | Label Smoothing={args.label_smoothing} | Weight Decay={args.weight_decay}")
 
-    # 5. Sliding Windows
+    # 6. Weight Transfer (Warm-Start without Losing Epoch 150 Progress)
+    starting_epoch = 1
+    if prev_data and "weights" in prev_data:
+        w = prev_data["weights"]
+        try:
+            # Transfer Hidden Layers 1 & 2 (Identical shapes)
+            model.fc1.weight.data.copy_(torch.tensor(w["W1"], dtype=torch.float32).t())
+            model.fc1.bias.data.copy_(torch.tensor(w["b1"], dtype=torch.float32))
+            model.fc2.weight.data.copy_(torch.tensor(w["W2"], dtype=torch.float32).t())
+            model.fc2.bias.data.copy_(torch.tensor(w["b2"], dtype=torch.float32))
+
+            # Transfer Embedding
+            old_e = torch.tensor(w["E"], dtype=torch.float32)
+            model.embedding.weight.data[:old_e.size(0), :].copy_(old_e)
+            if vocab_size > old_e.size(0):
+                e_mean = old_e.mean()
+                e_std = old_e.std()
+                model.embedding.weight.data[old_e.size(0):, :].normal_(e_mean.item(), e_std.item())
+
+            # Transfer Output Logits
+            w3_t = torch.tensor(w["W3"], dtype=torch.float32).t()
+            b3 = torch.tensor(w["b3"], dtype=torch.float32)
+            model.fc_out.weight.data[:w3_t.size(0), :].copy_(w3_t)
+            model.fc_out.bias.data[:b3.size(0)].copy_(b3)
+
+            starting_epoch = prev_data.get("epoch", 150) + 1
+            print(f"🌟 [Warm-Start] SUCCESS: 100% of Epoch {prev_data.get('epoch', 150)} weights preserved!")
+            print(f"🚀 Resuming continuous regularized training from Epoch {starting_epoch}!")
+        except Exception as e:
+            print(f"[!] Warning transferring weights ({e}). Starting fresh.")
+
+    # 7. Sliding Windows Generation
     pad_idx = vocab_map['<pad>']
     start_idx = vocab_map['<start>']
     sep_idx = vocab_map['<sep>']
@@ -322,51 +395,23 @@ def main():
             all_targets.append(seq[i])
 
     total_samples = len(all_inputs)
-    print(f"[Dataset] Generated {total_samples:,} sliding context sequences.")
+    print(f"[Dataset] Generated {total_samples:,} sliding context sequences across {len(raw_data):,} pairs.")
 
-    # 6. Check / Resume Weights
-    starting_epoch = 1
-    if not args.reset:
-        ensure_weights_available()
-        target_load = WEIGHTS_FILE if os.path.exists(WEIGHTS_FILE) else (WEIGHTS_FILE + ".gz")
-        if os.path.exists(target_load):
-            try:
-                print(f"[Setup] Loading checkpoint from {target_load}...")
-                if target_load.endswith('.gz'):
-                    import gzip
-                    with gzip.open(target_load, 'rt', encoding='utf-8') as f:
-                        prev_data = json.load(f)
-                else:
-                    with open(target_load, 'r', encoding='utf-8') as f:
-                        prev_data = json.load(f)
-
-                w = prev_data.get("weights", {})
-                if "E" in w and "W1" in w:
-                    model.embedding.weight.data.copy_(torch.tensor(w["E"], dtype=torch.float32))
-                    model.fc1.weight.data.copy_(torch.tensor(w["W1"], dtype=torch.float32).t())
-                    model.fc1.bias.data.copy_(torch.tensor(w["b1"], dtype=torch.float32))
-                    model.fc2.weight.data.copy_(torch.tensor(w["W2"], dtype=torch.float32).t())
-                    model.fc2.bias.data.copy_(torch.tensor(w["b2"], dtype=torch.float32))
-                    model.fc_out.weight.data.copy_(torch.tensor(w["W3"], dtype=torch.float32).t())
-                    model.fc_out.bias.data.copy_(torch.tensor(w["b3"], dtype=torch.float32))
-                    starting_epoch = prev_data.get("epoch", 0) + 1
-                    print(f"🌟 [Setup] Successfully loaded weights! Resuming from Epoch {starting_epoch}!")
-            except Exception as e:
-                print(f"[!] Warning loading weights ({e}). Starting fresh.")
-
-    # 7. Optimizer, Scheduler, Scaler
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-5)
+    # 8. Regularized Optimizer, Cosine Scheduler, Scaler, and Smoothed Loss
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
     scaler = torch.cuda.amp.GradScaler(enabled=use_cuda)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
 
     eval_suites = [
         {"category": "Conversation", "prompt": "hello"},
-        {"category": "VerScript", "prompt": "write a hello world program in verscript"},
+        {"category": "VerScript Syntax", "prompt": "write a hello world program in verscript"},
+        {"category": "Algorithm", "prompt": "write a function to check if a number is prime in verscript"},
+        {"category": "Syntax Repair", "prompt": "how to fix count = 10 in verscript"},
         {"category": "Inject Python", "prompt": "how to run python in verscript"},
         {"category": "Inject JS", "prompt": "write javascript async fetch function"},
         {"category": "Inject C", "prompt": "write c code for binary search"},
-        {"category": "VerScript Math", "prompt": "how to use Math.abs in verscript"}
+        {"category": "VerScript Stdlib", "prompt": "how to use Math.sqrt in verscript"}
     ]
 
     eval_history = []
@@ -379,8 +424,9 @@ def main():
 
     end_epoch = starting_epoch + args.epochs - 1
     print(f"\n[Training] Commencing GPU Training for Epochs {starting_epoch} -> {end_epoch}...")
+    print(f"[*] Training Strategy: Anti-Overfitting Active (Label Smoothing {args.label_smoothing}, Dropout {args.dropout})")
 
-    # 8. Main Loop
+    # 9. Main Loop
     for epoch in range(starting_epoch, end_epoch + 1):
         if os.path.exists(STOP_FILE):
             print(f"[Stop] Detected {STOP_FILE}. Halting cleanly.")
@@ -403,10 +449,10 @@ def main():
         total_tokens = 0
 
         for b_idx, (batch_x, batch_y) in enumerate(loader):
-            batch_x = batch_x.to(device)
-            batch_y = batch_y.to(device)
+            batch_x = batch_x.to(device, non_blocking=True)
+            batch_y = batch_y.to(device, non_blocking=True)
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
             with torch.cuda.amp.autocast(enabled=use_cuda):
                 logits = model(batch_x)
@@ -423,7 +469,7 @@ def main():
             total_correct += (preds == batch_y).sum().item()
             total_tokens += batch_x.size(0)
 
-            if (b_idx + 1) % 20 == 0 or (b_idx + 1) == len(loader):
+            if (b_idx + 1) % 25 == 0 or (b_idx + 1) == len(loader):
                 cur_loss = total_loss / total_tokens
                 cur_acc = (total_correct / total_tokens) * 100
                 print(f"  [Epoch {epoch}] Batch {b_idx + 1}/{len(loader)} | Loss: {cur_loss:.4f} | Acc: {cur_acc:.1f}%")
@@ -438,7 +484,7 @@ def main():
         # Save weights checkpoint after EVERY epoch
         export_weights(model, vocab, config, epoch, epoch_loss, epoch_acc / 100.0)
 
-        # Run LLM Generation Evaluation Tests
+        # Run Live LLM Generation Evaluation Tests
         print(f"\n--- [Epoch {epoch}] Live Neural Generation Test Review ---")
         epoch_review = {
             "epoch": epoch,
@@ -449,7 +495,7 @@ def main():
         }
 
         for test in eval_suites:
-            out_text = generate_text(model, vocab, vocab_map, test["prompt"], device, max_tokens=55, temperature=0.7, top_p=0.9)
+            out_text = generate_text(model, vocab, vocab_map, test["prompt"], device, max_tokens=60, temperature=0.75, top_p=0.9)
             epoch_review["tests"].append({
                 "category": test["category"],
                 "prompt": test["prompt"],
@@ -462,10 +508,10 @@ def main():
         with open(EVAL_FILE, "w", encoding="utf-8") as f:
             json.dump(eval_history, f, indent=2)
 
-    # 9. Auto-upload to Hugging Face if token provided
+    # 10. Auto-upload to Hugging Face Hub if token provided
     hf_token = args.hf_token or os.environ.get("HF_TOKEN")
     if hf_token and args.hf_repo:
-        print("\n[*] Automatically pushing latest trained weights to Hugging Face Hub...")
+        print("\n[*] Automatically pushing updated trained weights to Hugging Face Hub...")
         try:
             from huggingface_hub import HfApi, create_repo
             create_repo(args.hf_repo, repo_type="model", exist_ok=True, token=hf_token)
