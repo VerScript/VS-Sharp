@@ -257,6 +257,14 @@ function resolveVerScriptBinary() {
     for (const cand of candidates) {
         if (fs.existsSync(cand)) return cand;
     }
+
+    try {
+        const { execSync } = require('child_process');
+        const whichCmd = isWin ? 'where.exe verscript' : 'which verscript';
+        const p = execSync(whichCmd, { encoding: 'utf8' }).trim().split(/\r?\n/)[0];
+        if (p && fs.existsSync(p)) return p;
+    } catch (_) {}
+
     return null;
 }
 
