@@ -174,7 +174,12 @@ function generateLLMResponse(message, weightsData) {
             // Temperature sampling
             const temp = 0.75;
             const logProbs = probs.map(p => Math.log(p + 1e-10) / temp);
-            const maxLog = Math.max(...logProbs);
+            let maxLog = -Infinity;
+            for (let i = 0; i < logProbs.length; i++) {
+                if (logProbs[i] > maxLog) {
+                    maxLog = logProbs[i];
+                }
+            }
             const tempExps = logProbs.map(lp => Math.exp(lp - maxLog));
             const tempSum = tempExps.reduce((a, b) => a + b, 0);
             const tempProbs = tempExps.map(te => te / (tempSum || 1e-10));
