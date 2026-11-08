@@ -221,7 +221,13 @@ async function main() {
         .sort((a, b) => b[1] - a[1])
         .map(e => e[0]);
 
-    const vocab = [...specialTokens, ...sortedTokens];
+    const vocab = [];
+    for (let i = 0; i < specialTokens.length; i++) {
+        vocab.push(specialTokens[i]);
+    }
+    for (let i = 0; i < sortedTokens.length; i++) {
+        vocab.push(sortedTokens[i]);
+    }
     const vocabMap = new Map(vocab.map((t, idx) => [t, idx]));
     const vocabSize = vocab.length;
 
@@ -301,7 +307,15 @@ async function main() {
     for (let pair of rawData) {
         const pToks = tokenize(pair.prompt).map(getIdx);
         const rToks = tokenize(pair.response).map(getIdx);
-        const seq = [startIdx, ...pToks, sepIdx, ...rToks, endIdx];
+        const seq = [startIdx];
+        for (let i = 0; i < pToks.length; i++) {
+            seq.push(pToks[i]);
+        }
+        seq.push(sepIdx);
+        for (let i = 0; i < rToks.length; i++) {
+            seq.push(rToks[i]);
+        }
+        seq.push(endIdx);
         const promptLen = pToks.length + 2;
 
         for (let i = promptLen; i < seq.length; i++) {
