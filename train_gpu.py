@@ -236,6 +236,8 @@ def main():
     parser.add_argument("--label-smoothing", type=float, default=0.1, help="Label smoothing to avoid 99.8% overconfidence (default 0.1)")
     parser.add_argument("--weight-decay", type=float, default=0.01, help="AdamW weight decay regularization (default 0.01)")
     parser.add_argument("--reset", action="store_true", help="Reset weights to 0 (default: False)")
+    parser.add_argument("--resume", action="store_true", help="Explicit resume flag (resumes from checkpoint if available)")
+    parser.add_argument("--save-every", type=int, default=1, help="Checkpoint frequency in epochs (default: 1)")
     parser.add_argument("--hf-token", type=str, default=None, help="Hugging Face Write Token for auto-upload")
     parser.add_argument("--hf-repo", type=str, default="alexon-v8/VS-Sharp", help="Hugging Face model repo ID")
     args = parser.parse_args()
@@ -481,8 +483,9 @@ def main():
 
         print(f"\n[Epoch {epoch} Finished] Loss: {epoch_loss:.4f} | Accuracy: {epoch_acc:.1f}% | Time: {elapsed:.2f}s ({total_tokens/elapsed:.0f} tok/s) | LR: {scheduler.get_last_lr()[0]:.6f}")
 
-        # Save weights checkpoint after EVERY epoch
-        export_weights(model, vocab, config, epoch, epoch_loss, epoch_acc / 100.0)
+        # Save weights checkpoint according to --save-every frequency or on final epoch
+        if epoch % max(1, args.save_every) == 0 or epoch == end_epoch:
+            export_weights(model, vocab, config, epoch, epoch_loss, epoch_acc / 100.0)
 
         # Run Live LLM Generation Evaluation Tests
         print(f"\n--- [Epoch {epoch}] Live Neural Generation Test Review ---")

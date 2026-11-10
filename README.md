@@ -20,16 +20,24 @@ Official Neural Language Model & Intelligent Runtime Engine for **VerScript** an
 
 Training 15 million parameters on CPU is computationally intensive (~40 min/epoch). With cloud GPUs (Tesla T4 or P100), training takes **only ~3 to 5 seconds per epoch**!
 
-### Option A: Kaggle Notebooks (30 Hours/Week FREE GPU)
+### Option A: Kaggle Notebooks (30 Hours/Week FREE GPU - Pipeline v2)
 Kaggle provides **30 hours per week of completely free GPU compute** with **Tesla T4 x2** or **Tesla P100** (no credit limits!):
 
 1. Go to [kaggle.com](https://www.kaggle.com) and click **Create > New Notebook**.
-2. Click **File > Import Notebook** and upload [`kaggle_train.ipynb`](https://github.com/VerScript/VS-Sharp/blob/main/kaggle_train.ipynb) (or select **Upload from URL**).
+2. Click **File > Import Notebook** and upload [`kaggle_train_v2.ipynb`](https://github.com/VerScript/VS-Sharp/blob/main/kaggle_train_v2.ipynb).
 3. In the right-hand panel under **Settings**:
    - **Accelerator**: Select **GPU T4 x2** or **GPU P100**.
-   - **Internet**: Toggle to **Internet on** (required to clone from GitHub).
-4. Run all cells (`Shift + Enter`).
-5. After training completes, look at the right sidebar under **Data > Output** to download `model_weights.json.gz` with a single click!
+   - **Internet**: Toggle to **Internet on** (required to pull checkpoints & push to Hugging Face).
+4. *(Optional)* Add your Hugging Face Write Token in Kaggle under **Add-ons > Secrets** with label `HF_TOKEN`.
+5. Run all cells (`Shift + Enter`) or run the headless pipeline:
+   ```bash
+   python kaggle_runner_v2.py
+   ```
+6. **Features of Pipeline v2**:
+   - Automated checkpoint resumption (`--resume`) from Hugging Face (`alexon-v8/VS-Sharp`).
+   - Configurable checkpoint cadence (`--save-every N`).
+   - Anti-memorization regularizers: Dropout (0.15), Label Smoothing (0.1), and AdamW weight decay.
+   - Outputs `model_weights.json.gz` directly into Kaggle's **Data > Output** panel for 1-click browser download.
 
 ---
 
