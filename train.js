@@ -122,7 +122,9 @@ function testGeneration(model, vocab, vocabMap, promptText, maxTokens = 50) {
 
         const inputTensor = tf.tensor2d([ctx], [1, CONTEXT_WINDOW], 'int32');
         const predTensor = model.predict(inputTensor);
-        const probs = predTensor.squeeze().arraySync();
+        const squeezed = predTensor.squeeze();
+        const probs = squeezed.arraySync();
+        squeezed.dispose();
         inputTensor.dispose();
         predTensor.dispose();
 
